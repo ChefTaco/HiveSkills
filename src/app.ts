@@ -69,6 +69,7 @@ const requireAuth = (admin = false): MiddlewareHandler<{ Variables: Variables }>
     try {username=linkedLocalId(accountLinks,identity);} catch {throw new HTTPException(403,{message:'An explicit registry account link is required'});}
     const isAdmin=config.adminUsers.has(username);
     if(admin && !isAdmin)throw new HTTPException(403,{message:'Local administrator access is required'});
+    if(c.req.method!=='GET' && c.req.path.startsWith('/admin/deployments')){c.res=c.json({error:'DEPLOYMENT_ADAPTER_UNAVAILABLE',message:'Skill execution requires the Magnus job adapter'},503);return;}
     c.set('auth',{username,isAdmin});
     await next(); return;
   }

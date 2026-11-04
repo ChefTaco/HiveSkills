@@ -86,6 +86,12 @@ test('direct identity reads do not promote roles to registry write access', asyn
     401,
   );
 });
+test('browser deployment requests cannot invoke the legacy host execution worker',async()=>{
+  const response=await app.request('/admin/deployments/synthetic-target',{method:'POST',headers:{Authorization:'Bearer '+await token('hiveskills',['hiveskills:deploy']),'Content-Type':'application/json'},body:'{}'});
+  assert.equal(response.status,503);
+  assert.match(await response.text(),/Magnus job adapter/);
+});
+
 test('revoked identity sessions cannot use registry APIs', async () => {
   active = false;
   assert.equal(

@@ -23,3 +23,7 @@ replacement identity to impersonate a legacy account.
 The integration is under development. A passing unit suite does not authorize
 production adoption. Restore rehearsal, permissions, native clients, and browser
 workflow parity must pass before switching an existing installation.
+
+Browser-authorized deployment mutations remain unavailable until a Magnus job
+adapter is configured. They cannot fall through to the retained native SSH worker.
+Registry reads, immutable archives and assignments keep their product-owned APIs.

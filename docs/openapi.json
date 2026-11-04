@@ -187,6 +187,9 @@
           },
           "403": {
             "description": "Permission denied"
+          },
+          "503": {
+            "description": "Browser execution requires the Magnus job adapter"
           }
         },
         "security": [

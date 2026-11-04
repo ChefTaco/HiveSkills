@@ -42,6 +42,7 @@ function visit(node) {
           },
           401: { description: 'Authentication required' },
           403: { description: 'Permission denied' },
+          ...(path.startsWith('/admin/deployments') && method!=='get'?{503:{description:'Browser execution requires the Magnus job adapter'}}:{}),
         },
       };
     }
