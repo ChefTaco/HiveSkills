@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/ChefTaco/hive",
+  "revision": "78fb6cced1aade79b4c55160754f4d6466bf8891",
+  "source": "services/hive-skills",
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "d96e4a270b272167ecc03bcb9b2d2afe480349d5b8cd47d3a3379e6ca86de22c"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "62c95dd187b93bc61d2bdd2c8b66319378605a264d49e7a3cc6820d1555b6621"
+    },
+    {
+      "path": "Dockerfile",
+      "sha256": "e89b5130ac26f3478615b5d5b830a71159aafa07f781f515a29745adcf0d7fc6"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "README.md",
+      "sha256": "0a38deeac5ce2d60565bab035000d8f594c31b37a011b24404633e8a1f30cc18"
+    },
+    {
+      "path": "docker-compose.example.yml",
+      "sha256": "b569e1d8cf38a1377ed1b0ae78c652ec96ce4c264986c5d443960ed89a02c209"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "e831c21b1a3887c6096046e843b3c5818c33e02d9e0a0a529344d0efd9059cc3"
+    },
+    {
+      "path": "package.json",
+      "sha256": "b2bacee9b169668ee53e56e547d4aae3728a37146117713e6a9560c4fd352e73"
+    },
+    {
+      "path": "registry-sources/hivemem/SKILL.md",
+      "sha256": "3f0ef9906876acf67ca043c020f67f9e86e1ed1efddc13d9647befdb5628fa1b"
+    },
+    {
+      "path": "registry-sources/hivemem/references/tools.md",
+      "sha256": "1b6b6d90fd5818e0742f616d2d9e16fbd808760b41dd5ca36a0144ab468a0b57"
+    },
+    {
+      "path": "scripts/archive-utils.d.mts",
+      "sha256": "b09f7807ff8302bc7adf493e5f42e7adab96d62a92e49f40272d986848ac7d06"
+    },
+    {
+      "path": "scripts/archive-utils.mjs",
+      "sha256": "7a5f0c879552feb2ed7748b4b9ae1a56d9b8ee05c5b7123aca897c1b02eb23c7"
+    },
+    {
+      "path": "scripts/deploy-hermes-agent.sh",
+      "sha256": "dc4b7a87d67e8a4f163407966317702a83cf2514ac2d9ebcd64cb8012effcf1a"
+    },
+    {
+      "path": "scripts/deploy-hive-skills.sh",
+      "sha256": "f6dd0c5117c853a5f6efd44d8009c297f9067bbb367905548a18914d8d557081"
+    },
+    {
+      "path": "scripts/hermes-sync.mjs",
+      "sha256": "c64d0468422057a1a50b755c86ce0b7b2a2e8acc86a261e5be8e47abb1e028a0"
+    },
+    {
+      "path": "scripts/hermes-sync.test.mjs",
+      "sha256": "c6d952980a4840a29587c8abf1674da8ac870458a3017217baaf0a0f21794ceb"
+    },
+    {
+      "path": "src/app.test.ts",
+      "sha256": "e8b6f3b5e22f07432009f5ad2779ed681af439c7d240b76dd0737934c297f7b4"
+    },
+    {
+      "path": "src/app.ts",
+      "sha256": "f836a2ee692955b37e02e964e70db436e2c459e3736527f51e52bcf8cddf59f0"
+    },
+    {
+      "path": "src/archive.ts",
+      "sha256": "68f9c2538439567333e909f93ae194c50901c41531a6b2c36d57417bd684a1b8"
+    },
+    {
+      "path": "src/auth.test.ts",
+      "sha256": "0a3695270ce9e44f96cab13020e8f8cb1f8ee71c1dd5678e464a9ec78e5954e2"
+    },
+    {
+      "path": "src/auth.ts",
+      "sha256": "f56b3fa7afbaecb7c0bbb60dbc5965932d68455207142904df2544a48c6aee1c"
+    },
+    {
+      "path": "src/check.ts",
+      "sha256": "9b14228463d565b0adca5682de58da3d5d1ee2517cf6f692e09a9ec920272dc6"
+    },
+    {
+      "path": "src/cli.test.ts",
+      "sha256": "8495254394306d3fd56f3684263c402f6349ab0893f0dd89d6073b27b93d3377"
+    },
+    {
+      "path": "src/cli.ts",
+      "sha256": "f9869386618f3756c40070dcdec963f59dd64eaa225733918b3164235bf8ecdc"
+    },
+    {
+      "path": "src/compatibility.ts",
+      "sha256": "c274645fd988ea4fa80e0fa8c5b0c51c71c836c91093fbcb7fa83b14ec42a2f4"
+    },
+    {
+      "path": "src/config.ts",
+      "sha256": "d062a122fcffa86896b6d73fcf761cf568b568e372c4c4a75664b1c11c2e8f63"
+    },
+    {
+      "path": "src/db.ts",
+      "sha256": "43f5d128df0026b7566b4453ce2f71b3a9cf8f67204408d73ecd826208bde001"
+    },
+    {
+      "path": "src/deployment-worker.ts",
+      "sha256": "ef19798a5e1ca0a5391d4d74526f9f2c4f6cde1ac96a3ad0ba7d4265450ca4b8"
+    },
+    {
+      "path": "src/env-schema.ts",
+      "sha256": "33bc8b06894aafd28658b99bc1725991372b6d67ee1b19d42256c0cf151ce08b"
+    },
+    {
+      "path": "src/migrations/managed-format-1.ts",
+      "sha256": "b73f6f050c25fd3a2a31623d703aebc14d7997598f60e35d4d90f0f99a9a4cfe"
+    },
+    {
+      "path": "src/paths.ts",
+      "sha256": "7612713cfa36a3bacba09adc636e38e3bb3621f4d87b936f71c193305f20e897"
+    },
+    {
+      "path": "src/schema.ts",
+      "sha256": "7d30e3e70987fc3bc0714a6c91e0633195fb3df4691a45af1173c25a15310bce"
+    },
+    {
+      "path": "src/seed.ts",
+      "sha256": "971aa5603f20b898415a3026b39271ffc79c99cc81745940cbfdbe371b47d326"
+    },
+    {
+      "path": "src/server.ts",
+      "sha256": "ec3250bee84da1f73e94bea218988daeedb00ac48df1723845001ecfce8e96ca"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "c14d2e09f2ca1fdcc325ad48f23bc9c303178f34f843ad9f6193cc4e5e327448"
+    },
+    {
+      "path": "src/ui.ts",
+      "sha256": "132ed70de7c6a7956459ddf1fe0f79263fa8289f0b793f05e3110213e3638b31"
+    },
+    {
+      "path": "src/upgrade.ts",
+      "sha256": "fbf3898b9e1316570c47dee4802a7650c8e83592384fc6914c67a4a4e9bddfb4"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "d199aeec97d4a32e2084d8add92541b5d88ec80da85c1de8da83b1518037a259"
+    }
+  ],
+  "note": "Source snapshot checksums before product-specific changes. No private history or untracked files included."
+}
