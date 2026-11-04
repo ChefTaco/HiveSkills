@@ -16,6 +16,7 @@ import { store } from './db.js';
 import { page } from './ui.js';
 import type { AuthContext, Release } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
+import { Release as BrowserRelease } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -218,6 +219,12 @@ app.post('/auth/logout', (c) => {
 app.get('/auth/me', requireAuth(), (c) => c.json(c.get('auth')));
 
 app.get('/admin/skills', requireAuth(true), (c) => c.json(store.listAllSkills()));
+app.get('/admin/skills/:slug/releases', requireAuth(true), (c) => c.json(store.listReleases(c.req.param('slug')).map(release=>BrowserRelease.parse(release))));
+app.get('/admin/audit', requireAuth(true), (c) => {
+  const limit=Number(c.req.query('limit') ?? 50),before=Number(c.req.query('before') ?? Number.MAX_SAFE_INTEGER);
+  if(!Number.isSafeInteger(limit)||limit<1||limit>100||!Number.isSafeInteger(before)||before<1)throw new HTTPException(400,{message:'Invalid audit page'});
+  return c.json(store.listAudit(limit,before));
+});
 app.get('/admin/updates', requireAuth(true), async (c) => c.json(await updateStatus(metadata(releasePackageRoot).release, upgradeHome())));
 
 app.post('/admin/skills', requireAuth(true), async (c) => {

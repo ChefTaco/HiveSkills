@@ -62,6 +62,8 @@ export const store = {
   promoteRelease: (slug: string, version: string, channel: string): void => { db.prepare('INSERT INTO channel_releases VALUES (?,?,?) ON CONFLICT(channel,skill_slug) DO UPDATE SET version=excluded.version').run(channel, slug, version); },
   withdrawRelease: (slug: string, channel: string) => db.prepare('DELETE FROM channel_releases WHERE channel=? AND skill_slug=?').run(channel, slug),
   listChannels: () => db.prepare('SELECT * FROM channel_releases ORDER BY channel,skill_slug').all(),
+  listReleases: (slug: string): Release[] => (db.prepare('SELECT * FROM releases WHERE skill_slug=? ORDER BY created_at DESC').all(slug) as ReleaseRow[]).map(mapRelease),
+  listAudit: (limit: number, before: number) => db.prepare('SELECT id,actor,action,subject,details,created_at FROM audit_log WHERE id<? ORDER BY id DESC LIMIT ?').all(before,limit),
   enrollTarget: (target: string, channel: string, skills: string[] | null): string => {
     const token = randomBytes(32).toString('base64url');
     db.prepare('INSERT INTO target_policies VALUES (?,?,?,?,NULL,?) ON CONFLICT(target) DO UPDATE SET channel=excluded.channel,token_hash=excluded.token_hash,skills_json=excluded.skills_json,updated_at=excluded.updated_at').run(target, channel, tokenHash(token), skills ? JSON.stringify(skills) : null, now());

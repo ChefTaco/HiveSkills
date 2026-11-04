@@ -1,5 +1,345 @@
 {
   "components": {
+    "schemas": {
+      "Audit": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "details": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "actor",
+          "action",
+          "subject",
+          "details",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "Channel": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "enum": [
+              "stable",
+              "canary"
+            ],
+            "type": "string"
+          },
+          "skill_slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "skill_slug",
+          "version"
+        ],
+        "type": "object"
+      },
+      "CreateSkill": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 63,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
+      "DeploymentJob": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "actor",
+          "status",
+          "result",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "EnrollTarget": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "enum": [
+              "stable",
+              "canary"
+            ],
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "type": "object"
+      },
+      "Receipt": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "enum": [
+              "stable",
+              "canary"
+            ],
+            "type": "string"
+          },
+          "receipt_json": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skills_json": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "channel",
+          "skills_json",
+          "receipt_json",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Release": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "maxHermesVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minHermesVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "skillSlug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "skillSlug",
+          "version",
+          "sha256",
+          "notes",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "Skill": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "homepage",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "Target": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "host",
+          "username",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "UploadRelease": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "archiveBase64": {
+            "type": "string"
+          },
+          "maxHermesVersion": {
+            "type": "string"
+          },
+          "minHermesVersion": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "archiveBase64"
+        ],
+        "type": "object"
+      }
+    },
     "securitySchemes": {
       "nativeSession": {
         "in": "cookie",
@@ -36,11 +376,55 @@
         "summary": "GET /"
       }
     },
+    "/admin/audit": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Audit"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "GET /admin/audit"
+      }
+    },
     "/admin/channels": {
       "get": {
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Channel"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
           },
           "401": {
             "description": "Authentication required"
@@ -146,7 +530,17 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeploymentJob"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
           },
           "401": {
             "description": "Authentication required"
@@ -207,7 +601,17 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Receipt"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
           },
           "401": {
             "description": "Authentication required"
@@ -231,7 +635,17 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Skill"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
           },
           "401": {
             "description": "Authentication required"
@@ -251,6 +665,16 @@
         "summary": "GET /admin/skills"
       },
       "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkill"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Success; see the native API reference for payloads"
@@ -340,6 +764,48 @@
       }
     },
     "/admin/skills/{slug}/releases": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Release"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "GET /admin/skills/{slug}/releases"
+      },
       "post": {
         "parameters": [
           {
@@ -351,6 +817,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRelease"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Success; see the native API reference for payloads"
@@ -377,7 +853,17 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Target"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Authorized product records"
           },
           "401": {
             "description": "Authentication required"
@@ -443,6 +929,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollTarget"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Success; see the native API reference for payloads"

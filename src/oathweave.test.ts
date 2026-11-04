@@ -86,12 +86,60 @@ test('direct identity reads do not promote roles to registry write access', asyn
     401,
   );
 });
-test('browser deployment requests cannot invoke the legacy host execution worker',async()=>{
-  const response=await app.request('/admin/deployments/synthetic-target',{method:'POST',headers:{Authorization:'Bearer '+await token('hiveskills',['hiveskills:deploy']),'Content-Type':'application/json'},body:'{}'});
-  assert.equal(response.status,503);
-  assert.match(await response.text(),/Magnus job adapter/);
+test('browser deployment requests cannot invoke the legacy host execution worker', async () => {
+  const response = await app.request('/admin/deployments/synthetic-target', {
+    method: 'POST',
+    headers: {
+      Authorization:
+        'Bearer ' + (await token('hiveskills', ['hiveskills:deploy'])),
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+  assert.equal(response.status, 503);
+  assert.match(await response.text(), /Magnus job adapter/);
 });
 
+test('browser release history omits archive storage paths and audit pages stay bounded', async () => {
+  const { store } = await import('./db.js');
+  store.createSkill({
+    slug: 'browser-contract-fixture',
+    name: 'Browser fixture',
+    description: 'Synthetic registry test',
+    homepage: null,
+    enabled: true,
+  });
+  store.addRelease({
+    skillSlug: 'browser-contract-fixture',
+    version: '1.0.0',
+    sha256: 'f'.repeat(64),
+    archivePath: '/tmp/private-fixture-archive.tgz',
+    notes: null,
+    createdAt: new Date().toISOString(),
+  });
+  store.audit('admin', 'skill.fixture', 'browser-contract-fixture', {});
+  const headers = { Authorization: 'Bearer ' + (await token()) };
+  const releases = await app.request(
+    '/admin/skills/browser-contract-fixture/releases',
+    { headers },
+  );
+  assert.equal(releases.status, 200);
+  const body = (await releases.json()) as Array<Record<string, unknown>>;
+  assert.equal(body[0]?.version, '1.0.0');
+  assert.equal(body[0]?.archivePath, undefined);
+  const audit = await app.request('/admin/audit?limit=1', { headers });
+  assert.equal(audit.status, 200);
+  assert.equal(((await audit.json()) as unknown[]).length, 1);
+  assert.equal(
+    (await app.request('/admin/audit?limit=101', { headers })).status,
+    400,
+  );
+  assert.equal(
+    (await app.request('/admin/skills/browser-contract-fixture/releases'))
+      .status,
+    401,
+  );
+});
 test('revoked identity sessions cannot use registry APIs', async () => {
   active = false;
   assert.equal(

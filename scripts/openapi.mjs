@@ -1,6 +1,8 @@
 // Route inventory from the owning API source; full request/response schemas remain pending.
 import { readFileSync, writeFileSync } from 'node:fs';
 import ts from 'typescript';
+import { z } from 'zod';
+import { browserSchemas } from '../dist/browser-contracts.js';
 const source = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8');
 const tree = ts.createSourceFile(
   'app.ts',
@@ -42,7 +44,14 @@ function visit(node) {
           },
           401: { description: 'Authentication required' },
           403: { description: 'Permission denied' },
-          ...(path.startsWith('/admin/deployments') && method!=='get'?{503:{description:'Browser execution requires the Magnus job adapter'}}:{}),
+          ...(path.startsWith('/admin/deployments') && method !== 'get'
+            ? {
+                503: {
+                  description:
+                    'Browser execution requires the Magnus job adapter',
+                },
+              }
+            : {}),
         },
       };
     }
@@ -50,6 +59,41 @@ function visit(node) {
   ts.forEachChild(node, visit);
 }
 visit(tree);
+for (const [path, schema] of [
+  ['/admin/skills', 'Skill'],
+  ['/admin/skills/{slug}/releases', 'Release'],
+  ['/admin/channels', 'Channel'],
+  ['/admin/targets', 'Target'],
+  ['/admin/audit', 'Audit'],
+  ['/admin/receipts', 'Receipt'],
+  ['/admin/deployments', 'DeploymentJob'],
+]) {
+  paths[path].get.responses[200] = {
+    description: 'Authorized product records',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/' + schema },
+        },
+      },
+    },
+  };
+}
+for (const [path, method, schema] of [
+  ['/admin/skills', 'post', 'CreateSkill'],
+  ['/admin/skills/{slug}/releases', 'post', 'UploadRelease'],
+  ['/admin/targets/{target}/enroll', 'post', 'EnrollTarget'],
+]) {
+  paths[path][method].requestBody = {
+    required: true,
+    content: {
+      'application/json': {
+        schema: { $ref: '#/components/schemas/' + schema },
+      },
+    },
+  };
+}
 const version = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).version;
@@ -64,6 +108,12 @@ const spec = {
   servers: [{ url: 'https://skills.example.com' }],
   paths,
   components: {
+    schemas: Object.fromEntries(
+      Object.entries(browserSchemas).map(([name, schema]) => [
+        name,
+        z.toJSONSchema(schema),
+      ]),
+    ),
     securitySchemes: {
       resourceBearer: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       nativeSession: {
