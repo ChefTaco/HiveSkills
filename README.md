@@ -206,3 +206,20 @@ console routes remain available for recovery when the adapter is unconfigured;
 interrupted legacy jobs are retained as unknown instead of automatically retried.
 Rehearsal mode disables both workers and preserves pending records. Run an explicit
 backed-up `hive-skills migrate` before starting the new schema on existing state.
+
+
+To prepare a native client artifact for a tested Hive release, run:
+
+```bash
+node scripts/build-native-client.mjs --output /protected/new-client-artifact \
+  --url https://artifacts.example.com/hiveskills-client-1.2.2.tar.gz \
+  --node-version v24.22.1
+```
+
+The exporter accepts only unchanged tracked client modules, LICENSE and NOTICE.
+Its private output includes an archive and `nativeClients.hiveskills` metadata
+with exact archive/file SHA-256 digests and a tested Node version. It never reads
+profiles or deployment environments and does not publish anything. Release
+maintainers must review the metadata and include it in a publisher-signed Hive
+manifest before an operator stages it. Node remains an explicitly selected,
+existing root-owned host prerequisite; the archive does not install a runtime.

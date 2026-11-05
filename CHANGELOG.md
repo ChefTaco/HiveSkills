@@ -1,5 +1,7 @@
 # Changelog
 
+- Export reviewed public native client archives with exact file/runtime digests and preserved license notices for publisher-signed installer staging.
+
 - Revalidate native target authorization and the exact approved assignment before frozen deployments touch profile state. Disabled targets cannot approve or begin queued work.
 
 - Add exact publication deployment previews, expiring one-use approvals, durable Magnus job references and receipt-only recovery. Suite deployments no longer execute the legacy SSH helper; interrupted jobs stay unknown until reviewed.
