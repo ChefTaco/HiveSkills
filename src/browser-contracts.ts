@@ -48,11 +48,14 @@ export const DeploymentJob = z.object({
   id: z.string(),
   target: z.string(),
   actor: z.string(),
-  status: z.enum(['queued', 'running', 'completed', 'failed']),
+  status: z.enum(['awaiting_approval', 'queued', 'running', 'completed', 'failed', 'unknown']),
   result: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
+export const DeploymentCapabilities = z.object({enabled:z.boolean(),executor:z.literal('magnus'),message:z.string()});
+export const ManagedDeployment = DeploymentJob.extend({manifest_json:z.string(),publication_sha256:z.string().regex(/^[a-f0-9]{64}$/),approval_expires_at:z.string(),approved_at:z.string().nullable(),magnus_job_id:z.string().nullable()});
+export const DeploymentApproval = z.object({publicationSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 export const CreateSkill = z.object({
   slug: z.string().min(1).max(63),
   name: z.string().min(1).max(120),
@@ -72,6 +75,7 @@ export const EnrollTarget = z.object({
   skills: z.array(z.string()).optional(),
 });
 export const browserSchemas = {
+  ManagedDeployment, DeploymentApproval, DeploymentCapabilities,
   Skill,
   Release,
   Channel,

@@ -1,6 +1,7 @@
 import { createHash, randomUUID, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { DeploymentJournal } from './deployment-journal.js';
 import { config } from './config.js';
 import { compatibleVersion } from './compatibility.js';
 import type { DeploymentTarget, Release, Session, Skill } from './types.js';
@@ -16,6 +17,7 @@ const now = (): string => new Date().toISOString();
 const mapSkill = (row: SkillRow): Skill => ({ slug: row.slug, name: row.name, description: row.description, homepage: row.homepage, enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at });
 const mapRelease = (row: ReleaseRow): Release => ({ skillSlug: row.skill_slug, version: row.version, sha256: row.sha256, archivePath: row.archive_path, notes: row.notes, minHermesVersion: row.min_hermes_version, maxHermesVersion: row.max_hermes_version, createdAt: row.created_at });
 
+export const deploymentJournal = new DeploymentJournal(db);
 export const store = {
   readiness: (): { ready: boolean; missingArchives: number } => {
     db.prepare('SELECT 1').get();
@@ -28,9 +30,9 @@ export const store = {
     const id = randomUUID(); db.prepare("INSERT INTO deployment_jobs VALUES (?,?,?,'queued',NULL,?,?)").run(id, target, actor, now(), now()); return id;
   },
   listDeployments: () => db.prepare('SELECT * FROM deployment_jobs ORDER BY created_at DESC LIMIT 100').all(),
-  recoverDeployments: () => db.prepare("UPDATE deployment_jobs SET status='queued',result='recovered',updated_at=? WHERE status='running'").run(now()),
+  recoverDeployments: () => db.prepare("UPDATE deployment_jobs SET status='unknown',result='Interrupted legacy execution; manual outcome review required',updated_at=? WHERE status='running'").run(now()),
   claimDeployment: (): { id: string; target: string } | undefined => {
-    return db.prepare("UPDATE deployment_jobs SET status='running',updated_at=? WHERE id=(SELECT id FROM deployment_jobs WHERE status='queued' ORDER BY created_at LIMIT 1) RETURNING id,target").get(now()) as { id: string; target: string } | undefined;
+    return db.prepare("UPDATE deployment_jobs SET status='running',updated_at=? WHERE id=(SELECT id FROM deployment_jobs WHERE status='queued' AND id NOT IN (SELECT job_id FROM deployment_authorizations) ORDER BY created_at LIMIT 1) RETURNING id,target").get(now()) as { id: string; target: string } | undefined;
   },
   finishDeployment: (id: string, ok: boolean, code: string) => db.prepare('UPDATE deployment_jobs SET status=?,result=?,updated_at=? WHERE id=?').run(ok ? 'completed' : 'failed', code, now(), id),
   listSkills: (): Skill[] => (db.prepare('SELECT * FROM skills WHERE enabled = 1 ORDER BY name').all() as SkillRow[]).map(mapSkill),
@@ -69,6 +71,7 @@ export const store = {
     db.prepare('INSERT INTO target_policies VALUES (?,?,?,?,NULL,?) ON CONFLICT(target) DO UPDATE SET channel=excluded.channel,token_hash=excluded.token_hash,skills_json=excluded.skills_json,updated_at=excluded.updated_at').run(target, channel, tokenHash(token), skills ? JSON.stringify(skills) : null, now());
     return token;
   },
+  targetPolicy: (target: string) => {const row=db.prepare('SELECT channel,skills_json FROM target_policies WHERE target=?').get(target) as {channel:string;skills_json:string|null}|undefined;return row?{channel:row.channel,skills:row.skills_json?JSON.parse(row.skills_json) as string[]:undefined}:null;},
   authenticateTarget: (target: string, token: string) => {
     if (!store.getTarget(target)) return null;
     const policy = db.prepare('SELECT channel,skills_json FROM target_policies WHERE target=? AND token_hash=?').get(target, tokenHash(token)) as { channel: string; skills_json: string | null } | undefined;

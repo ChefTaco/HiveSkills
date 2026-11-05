@@ -182,3 +182,27 @@ the selected deployment. When the service certificate uses a DNS name, set
 bundle when needed. Probes retain certificate verification. Runtime state belongs
 in `/data`; mount only product-owned protected configuration in `/config`.
 Images are local candidates until registry publication and release acceptance.
+
+### Approved deployments through Magnus
+
+Suite browser deployments require `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` with a verified
+HTTPS `url`, a protected `credentialFile`, and optional `caFile`. The credential is
+a dedicated endpoint-scoped grant configured in Magnus; it cannot run arbitrary
+commands or administer the fleet. Each logical registry target must be explicitly
+mapped to an enrolled Magnus node and a configured native agent target. Host-native
+credential files and the pinned HiveSkills sync client are installed by the host
+installer, independently of the application container.
+
+Prepare an exact publication preview, review its releases and digest, then approve
+it once within five minutes using recent authentication. The registry persists
+approval before dispatch. The owning agent verifies immutable archive digests,
+origin, compatibility and the existing native target credential. Magnus retains
+the signed native outcome under the original durable job ID. An interrupted or
+unknown operation is reconciled through that original receipt and never replayed
+under a new ID. A queued approval that expires cannot dispatch.
+
+The Magnus adapter disables the legacy SSH worker. Existing standalone native
+console routes remain available for recovery when the adapter is unconfigured;
+interrupted legacy jobs are retained as unknown instead of automatically retried.
+Rehearsal mode disables both workers and preserves pending records. Run an explicit
+backed-up `hive-skills migrate` before starting the new schema on existing state.

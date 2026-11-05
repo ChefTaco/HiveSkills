@@ -43,6 +43,7 @@ export async function skillsMigration(args: readonly string[], automatic = false
       return {
         ...state,
         dataChanged:
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='deployment_authorizations'").get() ||
           !columns.has('min_hermes_version') ||
           !columns.has('max_hermes_version') ||
           !db.prepare("SELECT id FROM registry_migrations WHERE id='release-channels'").get(),

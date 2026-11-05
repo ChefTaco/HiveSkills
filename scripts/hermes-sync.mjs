@@ -24,7 +24,7 @@ function atomicJson(path, value) {
   const directory = openSync(dirname(path), 'r'); try { fsyncSync(directory); } finally { closeSync(directory); }
 }
 
-export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => {
+export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => {
   const result = spawnSync('/usr/bin/systemctl', ['--user', 'try-restart', 'hermes-gateway.service'], { timeout: 30_000 });
   if (result.status !== 0) throw new Error('Hermes gateway restart failed');
 } }) {
@@ -66,7 +66,7 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     const manifestUrl = new URL(origin.href.replace(/\/$/, '') + '/v1/agent/manifest');
     if (target) { if (!token) throw new Error('Target token required'); manifestUrl.searchParams.set('target', target); }
     if (hermesVersion) { if (!versionParts(hermesVersion)) throw new Error('Invalid local Hermes version'); manifestUrl.searchParams.set('hermes_version', hermesVersion); }
-    const manifest = JSON.parse((await boundedResponse(await fetchImpl(manifestUrl, { ...(target ? { headers: { authorization: `Bearer ${token}` } } : {}), redirect: 'error', signal: AbortSignal.timeout(20_000) }), 1024 * 1024)).toString('utf8'));
+    const manifest = frozenManifest ?? JSON.parse((await boundedResponse(await fetchImpl(manifestUrl, { ...(target ? { headers: { authorization: `Bearer ${token}` } } : {}), redirect: 'error', signal: AbortSignal.timeout(20_000) }), 1024 * 1024)).toString('utf8'));
     if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.skills) || manifest.skills.length > 1000) throw new Error('Unsupported manifest');
     const channel = manifest.channel ?? 'stable';
     if (channel !== 'stable' && channel !== 'canary') throw new Error('Unsupported manifest channel');
@@ -126,5 +126,5 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN });
+  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined });
 }

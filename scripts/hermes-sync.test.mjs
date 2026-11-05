@@ -103,3 +103,12 @@ test('canary manifests download from the channel-scoped archive URL', async () =
     await assert.rejects(syncSkills({ ...options, hermesHome: join(f.root, 'other') }), /Unexpected archive origin or path/);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
+
+test('managed synchronization consumes the exact frozen publication instead of a changed live manifest', async () => {
+ const f=fixture();try{
+  const bytes=f.pack(),entry={slug:'fixture',version:'1.0.0',sha256:createHash('sha256').update(bytes).digest('hex'),archiveUrl:'https://registry.test/v1/skills/fixture/releases/1.0.0/archive'};
+  let calls=0;
+  await syncSkills({registry:'https://registry.test',hermesHome:join(f.root,'hermes'),hermesVersion:'2.4.0',frozenManifest:{schemaVersion:1,channel:'stable',skills:[entry]},restart:()=>{},fetchImpl:async url=>{calls++;assert.ok(!new URL(url).pathname.endsWith('/manifest'));return new Response(bytes)}});
+  assert.equal(calls,1);assert.equal(readFileSync(join(f.root,'hermes/skills/registry/fixture/SKILL.md'),'utf8'),'# Fixture\n');
+ }finally{rmSync(f.root,{recursive:true,force:true})}
+});

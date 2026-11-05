@@ -40,6 +40,7 @@ after(() => {
 const token = async (
   audience = 'hiveskills',
   permissions = ['hiveskills:read'],
+  authenticatedAt?:number,
 ) =>
   new SignJWT({
     actorType: 'USER',
@@ -47,6 +48,7 @@ const token = async (
     clientId: 'hivexui-hiveskills',
     roles: ['SUPER_ADMIN'],
     permissions,
+    ...(authenticatedAt===undefined?{}:{auth_time:authenticatedAt}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: 'test' })
     .setSubject('fake-user')
@@ -140,6 +142,22 @@ test('browser release history omits archive storage paths and audit pages stay b
     401,
   );
 });
+test('direct deployment approval requires scoped permissions, exact digest, recent sign-in and one-use ownership', async () => {
+ process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON=JSON.stringify({url:'https://magnus.example.com',credentialFile:'/run/secrets/fixture-executor'});
+ try {
+  const {store}=await import('./db.js');store.saveTarget({name:'fixture-managed',host:'node.example.com',username:'deploy',enabled:true});store.enrollTarget('fixture-managed','stable',[]);
+  const send=async(path:string,body:unknown,authTime?:number,permissions=['hiveskills:deploy'])=>app.request(path,{method:'POST',headers:{authorization:'Bearer '+await token('hiveskills',permissions,authTime),'content-type':'application/json'},body:JSON.stringify(body)});
+  assert.equal((await send('/admin/deployments/fixture-managed',{},undefined,['hiveskills:write'])).status,403);
+  const preview=await send('/admin/deployments/fixture-managed',{});assert.equal(preview.status,201);const job=await preview.json() as {id:string;publication_sha256:string;status:string};assert.equal(job.status,'awaiting_approval');
+  const approve='/admin/deployments/jobs/'+job.id+'/approve';
+  assert.equal((await send(approve,{publicationSha256:job.publication_sha256})).status,403);
+  assert.equal((await send(approve,{publicationSha256:job.publication_sha256},Math.floor(Date.now()/1000)-600)).status,403);
+  const now=Math.floor(Date.now()/1000);assert.equal((await send(approve,{publicationSha256:'b'.repeat(64)},now)).status,409);
+  assert.equal((await send(approve,{publicationSha256:job.publication_sha256},now)).status,202);
+  assert.equal((await send(approve,{publicationSha256:job.publication_sha256},now)).status,409);
+ }finally{delete process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON}
+});
+
 test('revoked identity sessions cannot use registry APIs', async () => {
   active = false;
   assert.equal(

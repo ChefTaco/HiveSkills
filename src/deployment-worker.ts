@@ -6,6 +6,7 @@ import { maintenanceActive } from './release/runtime.js';
 /** One local deployment at a time. Output may contain credentials: retain only exit codes. */
 export function startDeploymentWorker(): () => Promise<void> {
   // Rehearsals must preserve queued/running outcomes as well as prevent dispatch.
+  if (process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON) return async () => {};
   if (process.env.HIVE_REHEARSAL === 'true' || process.env.HIVE_SKILLS_DEPLOYMENT_WORKER_ENABLED === 'false') return async () => {};
   let busy = false;
   let active = Promise.resolve();

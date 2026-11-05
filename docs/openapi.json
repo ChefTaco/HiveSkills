@@ -95,6 +95,42 @@
         ],
         "type": "object"
       },
+      "DeploymentApproval": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "publicationSha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publicationSha256"
+        ],
+        "type": "object"
+      },
+      "DeploymentCapabilities": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "executor": {
+            "const": "magnus",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "executor",
+          "message"
+        ],
+        "type": "object"
+      },
       "DeploymentJob": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -116,10 +152,12 @@
           },
           "status": {
             "enum": [
+              "awaiting_approval",
               "queued",
               "running",
               "completed",
-              "failed"
+              "failed",
+              "unknown"
             ],
             "type": "string"
           },
@@ -161,6 +199,81 @@
         },
         "required": [
           "channel"
+        ],
+        "type": "object"
+      },
+      "ManagedDeployment": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "approval_expires_at": {
+            "type": "string"
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "magnus_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "manifest_json": {
+            "type": "string"
+          },
+          "publication_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "awaiting_approval",
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "actor",
+          "status",
+          "result",
+          "created_at",
+          "updated_at",
+          "manifest_json",
+          "publication_sha256",
+          "approval_expires_at",
+          "approved_at",
+          "magnus_job_id"
         ],
         "type": "object"
       },
@@ -574,7 +687,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedDeployment"
+                }
+              }
+            },
+            "description": "Owned deployment state"
           },
           "401": {
             "description": "Authentication required"
@@ -595,6 +715,176 @@
           }
         ],
         "summary": "POST /admin/deployments/{target}"
+      }
+    },
+    "/admin/deployments/capabilities": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentCapabilities"
+                }
+              }
+            },
+            "description": "Owned deployment state"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "GET /admin/deployments/capabilities"
+      }
+    },
+    "/admin/deployments/jobs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedDeployment"
+                }
+              }
+            },
+            "description": "Owned deployment state"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "GET /admin/deployments/jobs/{id}"
+      }
+    },
+    "/admin/deployments/jobs/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedDeployment"
+                }
+              }
+            },
+            "description": "Owned deployment state"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "503": {
+            "description": "Browser execution requires the Magnus job adapter"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "POST /admin/deployments/jobs/{id}/approve"
+      }
+    },
+    "/admin/deployments/jobs/{id}/reconcile": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedDeployment"
+                }
+              }
+            },
+            "description": "Owned deployment state"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "503": {
+            "description": "Browser execution requires the Magnus job adapter"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "POST /admin/deployments/jobs/{id}/reconcile"
       }
     },
     "/admin/receipts": {

@@ -1,5 +1,7 @@
 # Changelog
 
+- Add exact publication deployment previews, expiring one-use approvals, durable Magnus job references and receipt-only recovery. Suite deployments no longer execute the legacy SSH helper; interrupted jobs stay unknown until reviewed.
+
 ## Unreleased ecosystem extraction
 
 Add browser-safe release history and bounded audit APIs with owned OpenAPI contracts.

@@ -12,7 +12,10 @@ import type { MiddlewareHandler } from 'hono';
 import { config } from './config.js';
 import { persistArchive, assertSkillId, removeArchive } from './archive.js';
 import { authenticateOsUser, createSession, readAuth, removeSession, sessionCookie } from './auth.js';
-import { store } from './db.js';
+import { store, deploymentJournal } from './db.js';
+import { requireMagnusExecutor, executeMagnusJob, magnusExecutorConfiguration } from './magnus-deployment.js';
+import { type Publication } from './deployment-journal.js';
+import { z } from 'zod';
 import { page } from './ui.js';
 import type { AuthContext, Release } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
@@ -70,7 +73,7 @@ const requireAuth = (admin = false): MiddlewareHandler<{ Variables: Variables }>
     try {username=linkedLocalId(accountLinks,identity);} catch {throw new HTTPException(403,{message:'An explicit registry account link is required'});}
     const isAdmin=config.adminUsers.has(username);
     if(admin && !isAdmin)throw new HTTPException(403,{message:'Local administrator access is required'});
-    if(c.req.method!=='GET' && c.req.path.startsWith('/admin/deployments')){c.res=c.json({error:'DEPLOYMENT_ADAPTER_UNAVAILABLE',message:'Skill execution requires the Magnus job adapter'},503);return;}
+    if(c.req.method!=='GET' && c.req.path.startsWith('/admin/deployments')){if(!magnusExecutorConfiguration()){c.res=c.json({error:'DEPLOYMENT_ADAPTER_UNAVAILABLE',message:'Skill execution requires the Magnus job adapter'},503);return;}if(c.req.path.endsWith('/approve')&&(!identity.authenticatedAt||Date.now()-identity.authenticatedAt>300_000||identity.authenticatedAt>Date.now()+30_000))throw new HTTPException(403,{message:'Recent Oathweave authentication is required for exact one-use deployment approval'});}
     c.set('auth',{username,isAdmin});
     await next(); return;
   }
@@ -359,14 +362,34 @@ app.post('/admin/targets/:target/enroll', requireAuth(true), async (c) => {
   return c.json({ target, token, oneTime: true }, 201);
 });
 
+app.get('/admin/deployments/capabilities',requireAuth(true),c=>c.json({enabled:Boolean(magnusExecutorConfiguration()),executor:'magnus',message:magnusExecutorConfiguration()?'Exact publication previews and one-use approvals are available':'Configure the Magnus executor and native target client before deployment'}));
 app.get('/admin/deployments', requireAuth(true), (c) => c.json(store.listDeployments()));
 
 app.post('/admin/deployments/:target', requireAuth(true), (c) => {
   const target = store.getTarget(c.req.param('target'));
   if (!target) throw new HTTPException(404, { message: 'Deployment target not found or disabled' });
+  // Suite deployments always use the owned, approved Magnus operation. The
+  // standalone native console retains its historical recovery route when unset.
+  if(process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON){
+    requireMagnusExecutor();
+    const policy=store.targetPolicy(target.name);if(!policy)throw new HTTPException(409,{message:'Enroll the native target before preparing its deployment'});
+    const manifest:Publication={schemaVersion:1,channel:policy.channel,skills:store.activeManifest(policy.channel,policy.skills,undefined,false).map(({release,...skill})=>({slug:skill.slug,name:skill.name,version:release.version,sha256:release.sha256,compatibility:{minHermesVersion:release.minHermesVersion??null,maxHermesVersion:release.maxHermesVersion??null},archiveUrl:archiveUrl(skill.slug,release,policy.channel)}))};
+    const job=deploymentJournal.preview(target.name,c.get('auth').username,manifest);
+    store.audit(c.get('auth').username,'deployment.prepared',target.name,{id:job.id,publicationSha256:job.publication_sha256});c.header('Cache-Control','no-store');return c.json(job,201);
+  }
   const id = store.createDeployment(target.name, c.get('auth').username);
   store.audit(c.get('auth').username, 'deployment.queued', target.name, { id });
   return c.json({ id, status: 'queued', target: target.name }, 202);
+});
+
+app.get('/admin/deployments/jobs/:id',requireAuth(true),c=>{c.header('Cache-Control','no-store');return c.json(deploymentJournal.get(c.req.param('id')))});
+app.post('/admin/deployments/jobs/:id/approve',requireAuth(true),async c=>{
+ const parsed=z.object({publicationSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict().safeParse(await c.req.json().catch(()=>null));if(!parsed.success)throw new HTTPException(400,{message:'Exact publication digest is required'});
+ requireMagnusExecutor();const job=deploymentJournal.approve(c.req.param('id'),c.get('auth').username,parsed.data.publicationSha256);store.audit(c.get('auth').username,'deployment.approved',String(job.target),{id:job.id,publicationSha256:job.publication_sha256});return c.json(job,202);
+});
+app.post('/admin/deployments/jobs/:id/reconcile',requireAuth(true),async c=>{
+ requireMagnusExecutor();const id=c.req.param('id'),job=deploymentJournal.get(id);if(!['running','unknown'].includes(String(job.status)))throw new HTTPException(409,{message:'Only an existing uncertain dispatch can be reconciled'});
+ const reply=await executeMagnusJob(id,true);deploymentJournal.outcome(id,reply.status==='running'?'unknown':reply.status==='not_admitted'?'failed':reply.status,reply.result,reply.jobId);store.audit(c.get('auth').username,'deployment.reconciled',String(job.target),{id,status:reply.status});return c.json(deploymentJournal.get(id));
 });
 
 app.onError((error, c) => {

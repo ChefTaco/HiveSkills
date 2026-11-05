@@ -12,12 +12,14 @@ const { default: app } = await import('./app.js');
 const { startDeploymentWorker } = await import('./deployment-worker.js');
 const server = createServer(tls, getRequestListener(app.fetch)).listen(config.port, config.host, () => console.log(`hive-skills listening at ${config.publicUrl}`));
 
+const { startMagnusDeploymentWorker } = await import('./magnus-deployment.js');
+const stopMagnusWorker = startMagnusDeploymentWorker();
 const stopWorker = startDeploymentWorker();
 let closing = false;
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
   if (closing) return;
   closing = true;
-  void Promise.all([stopWorker(), new Promise<void>((done) => server.close(() => done()))]).then(() => process.exit(0));
+  void Promise.all([stopWorker(), stopMagnusWorker(), new Promise<void>((done) => server.close(() => done()))]).then(() => process.exit(0));
 });
 
 (await import('./release/runtime.js')).startUpdateChecks(JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version);

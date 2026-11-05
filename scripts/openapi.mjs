@@ -80,7 +80,9 @@ for (const [path, schema] of [
     },
   };
 }
+for(const [path,method,schema] of [['/admin/deployments/{target}','post','ManagedDeployment'],['/admin/deployments/jobs/{id}','get','ManagedDeployment'],['/admin/deployments/jobs/{id}/approve','post','ManagedDeployment'],['/admin/deployments/jobs/{id}/reconcile','post','ManagedDeployment'],['/admin/deployments/capabilities','get','DeploymentCapabilities']]){paths[path][method].responses[200]={description:'Owned deployment state',content:{'application/json':{schema:{$ref:'#/components/schemas/'+schema}}}};}
 for (const [path, method, schema] of [
+  ['/admin/deployments/jobs/{id}/approve','post','DeploymentApproval'],
   ['/admin/skills', 'post', 'CreateSkill'],
   ['/admin/skills/{slug}/releases', 'post', 'UploadRelease'],
   ['/admin/targets/{target}/enroll', 'post', 'EnrollTarget'],

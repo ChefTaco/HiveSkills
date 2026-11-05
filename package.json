@@ -232,6 +232,14 @@
         "impact": "fast",
         "readableBy": "^1.1.0",
         "note": "Adopt existing compatible state and record its format; no destructive conversion."
+      },
+      {
+        "component": "skills",
+        "id": "managed-format-2",
+        "checksum": "a9803de4fb36b043e8ab0f7e8fe4f09f652ffa7c9f1d8eed3674a6e4756544f1",
+        "impact": "fast",
+        "readableBy": "^1.2.2",
+        "note": "Add durable exact-publication deployment approvals and Magnus receipt references without altering legacy jobs."
       }
     ],
     "wireCompatibility": {
