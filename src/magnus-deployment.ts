@@ -3,7 +3,7 @@ import { request } from 'node:https';
 import { z } from 'zod';
 import { HTTPException } from 'hono/http-exception';
 import { maintenanceActive } from './release/runtime.js';
-import { deploymentJournal } from './db.js';
+import { deploymentJournal, store } from './db.js';
 
 export const executorConfiguration=z.object({url:z.url().refine(value=>{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash}),credentialFile:z.string().min(1),caFile:z.string().min(1).optional()}).strict();
 export function magnusExecutorConfiguration(){
@@ -32,6 +32,6 @@ export async function executeMagnusJob(id:string,reconcile=false){
 export function startMagnusDeploymentWorker():()=>Promise<void>{
  if(process.env.HIVE_REHEARSAL==='true'||process.env.HIVE_SKILLS_DEPLOYMENT_WORKER_ENABLED==='false'||!magnusExecutorConfiguration())return async()=>{};
  let active:Promise<void>|null=null;deploymentJournal.recover();
- const timer=setInterval(()=>{if(active||maintenanceActive('/worker'))return;const job=deploymentJournal.claim();if(!job)return;const id=String(job.id);active=(async()=>{try{const reply=await executeMagnusJob(id);deploymentJournal.outcome(id,reply.status==='running'?'unknown':reply.status==='not_admitted'?'failed':reply.status,reply.result,reply.jobId)}catch{deploymentJournal.outcome(id,'unknown','Original dispatch may have started; reconcile its exact Magnus job without replay')}finally{active=null}})()},1000);timer.unref();
+ const timer=setInterval(()=>{if(active||maintenanceActive('/worker'))return;const job=deploymentJournal.claim();if(!job)return;const id=String(job.id);if(!store.getTarget(String(job.target))){deploymentJournal.outcome(id,'failed','Target disabled before dispatch');return;}active=(async()=>{try{const reply=await executeMagnusJob(id);deploymentJournal.outcome(id,reply.status==='running'?'unknown':reply.status==='not_admitted'?'failed':reply.status,reply.result,reply.jobId)}catch{deploymentJournal.outcome(id,'unknown','Original dispatch may have started; reconcile its exact Magnus job without replay')}finally{active=null}})()},1000);timer.unref();
  return async()=>{clearInterval(timer);await active};
 }

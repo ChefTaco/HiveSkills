@@ -30,6 +30,18 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
 } }) {
   const origin = new URL(registry);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) throw new Error('Registry requires a plain HTTPS URL');
+  // A frozen approval never bypasses native target revocation or a changed
+  // assignment. Authorize before touching profile state, then consume only the
+  // exact approved immutable publication (timestamps are not publication pins).
+  if (frozenManifest && target) {
+    if (!token) throw new Error('Target token required');
+    const authorizedUrl = new URL(origin.href.replace(/\/$/, '') + '/v1/agent/manifest');
+    authorizedUrl.searchParams.set('target', target);
+    if (hermesVersion) authorizedUrl.searchParams.set('hermes_version', hermesVersion);
+    const authorized = JSON.parse((await boundedResponse(await fetchImpl(authorizedUrl, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 1024 * 1024)).toString('utf8'));
+    const publication = value => JSON.stringify({ schemaVersion: value.schemaVersion, channel: value.channel ?? 'stable', skills: value.skills });
+    if (publication(authorized) !== publication(frozenManifest)) throw new Error('Approved publication differs from the current authorized target assignment; prepare a new review');
+  }
   const root = resolve(hermesHome, 'skills', 'registry');
   const control = resolve(hermesHome, '.hive-skills-sync');
   const statePath = resolve(root, '.hive-skills-state.json');

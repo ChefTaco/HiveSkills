@@ -385,7 +385,7 @@ app.post('/admin/deployments/:target', requireAuth(true), (c) => {
 app.get('/admin/deployments/jobs/:id',requireAuth(true),c=>{c.header('Cache-Control','no-store');return c.json(deploymentJournal.get(c.req.param('id')))});
 app.post('/admin/deployments/jobs/:id/approve',requireAuth(true),async c=>{
  const parsed=z.object({publicationSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict().safeParse(await c.req.json().catch(()=>null));if(!parsed.success)throw new HTTPException(400,{message:'Exact publication digest is required'});
- requireMagnusExecutor();const job=deploymentJournal.approve(c.req.param('id'),c.get('auth').username,parsed.data.publicationSha256);store.audit(c.get('auth').username,'deployment.approved',String(job.target),{id:job.id,publicationSha256:job.publication_sha256});return c.json(job,202);
+ requireMagnusExecutor();if(!store.getTarget(String(deploymentJournal.get(c.req.param('id')).target)))throw new HTTPException(409,{message:'Target was disabled before approval'});const job=deploymentJournal.approve(c.req.param('id'),c.get('auth').username,parsed.data.publicationSha256);store.audit(c.get('auth').username,'deployment.approved',String(job.target),{id:job.id,publicationSha256:job.publication_sha256});return c.json(job,202);
 });
 app.post('/admin/deployments/jobs/:id/reconcile',requireAuth(true),async c=>{
  requireMagnusExecutor();const id=c.req.param('id'),job=deploymentJournal.get(id);if(!['running','unknown'].includes(String(job.status)))throw new HTTPException(409,{message:'Only an existing uncertain dispatch can be reconciled'});

@@ -112,3 +112,13 @@ test('managed synchronization consumes the exact frozen publication instead of a
   assert.equal(calls,1);assert.equal(readFileSync(join(f.root,'hermes/skills/registry/fixture/SKILL.md'),'utf8'),'# Fixture\n');
  }finally{rmSync(f.root,{recursive:true,force:true})}
 });
+
+test('frozen publications preserve current native target revocation and exact assignment checks before profile writes', async()=>{
+ const f=fixture();try{
+  const frozenManifest={schemaVersion:1,channel:'stable',skills:[]};let calls=0;
+  const options={registry:'https://registry.test',hermesHome:join(f.root,'hermes'),target:'fixture-target',token:'obviously-fake-target-token',hermesVersion:'2.4.0',frozenManifest,restart:()=>{}};
+  await assert.rejects(syncSkills({...options,fetchImpl:async()=>{calls++;return new Response('',{status:401})}}));assert.equal(calls,1);assert.ok(!existsSync(options.hermesHome));
+  await assert.rejects(syncSkills({...options,fetchImpl:async()=>Response.json({...frozenManifest,skills:[{slug:'changed'}]})}),/current authorized target assignment/);assert.ok(!existsSync(options.hermesHome));
+  await syncSkills({...options,fetchImpl:async()=>Response.json({...frozenManifest,generatedAt:'ignored-publication-timestamp'})});assert.ok(existsSync(options.hermesHome));
+ }finally{rmSync(f.root,{recursive:true,force:true})}
+});
