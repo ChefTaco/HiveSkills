@@ -34,6 +34,59 @@
         ],
         "type": "object"
       },
+      "AuditList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "actor": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "details": {
+              "type": "string"
+            },
+            "id": {
+              "type": "number"
+            },
+            "subject": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "actor",
+            "action",
+            "subject",
+            "details",
+            "created_at"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "AuthMe": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "isAdmin"
+        ],
+        "type": "object"
+      },
       "Channel": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -59,6 +112,34 @@
         ],
         "type": "object"
       },
+      "ChannelList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "enum": [
+                "stable",
+                "canary"
+              ],
+              "type": "string"
+            },
+            "skill_slug": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel",
+            "skill_slug",
+            "version"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
       "CreateSkill": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -72,9 +153,14 @@
             "type": "boolean"
           },
           "homepage": {
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "name": {
@@ -85,6 +171,7 @@
           "slug": {
             "maxLength": 63,
             "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
             "type": "string"
           }
         },
@@ -179,6 +266,83 @@
         ],
         "type": "object"
       },
+      "DeploymentJobList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "result": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "awaiting_approval",
+                "queued",
+                "running",
+                "completed",
+                "failed",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "target",
+            "actor",
+            "status",
+            "result",
+            "created_at",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "EmptyResponse": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "EnrollmentResponse": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "oneTime": {
+            "const": true,
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "token",
+          "oneTime"
+        ],
+        "type": "object"
+      },
       "EnrollTarget": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -192,6 +356,9 @@
           },
           "skills": {
             "items": {
+              "maxLength": 63,
+              "minLength": 1,
+              "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
               "type": "string"
             },
             "type": "array"
@@ -277,6 +444,35 @@
         ],
         "type": "object"
       },
+      "Ok": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "PromoteRelease": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
       "Receipt": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -315,6 +511,48 @@
           "updated_at"
         ],
         "type": "object"
+      },
+      "ReceiptList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "channel": {
+              "enum": [
+                "stable",
+                "canary"
+              ],
+              "type": "string"
+            },
+            "receipt_json": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "skills_json": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "channel",
+            "skills_json",
+            "receipt_json",
+            "updated_at"
+          ],
+          "type": "object"
+        },
+        "type": "array"
       },
       "Release": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -361,6 +599,54 @@
         ],
         "type": "object"
       },
+      "ReleaseList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "maxHermesVersion": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "minHermesVersion": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "notes": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sha256": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "skillSlug": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "skillSlug",
+            "version",
+            "sha256",
+            "notes",
+            "createdAt"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
       "Skill": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -401,6 +687,49 @@
         ],
         "type": "object"
       },
+      "SkillList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "createdAt": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "homepage": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "slug": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "slug",
+            "name",
+            "description",
+            "homepage",
+            "enabled",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
       "Target": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -426,23 +755,137 @@
         ],
         "type": "object"
       },
+      "TargetList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "host": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "host",
+            "username",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "UpdateSkill": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateTarget": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "maxLength": 253,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.-]*$",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[a-z_][a-z0-9_-]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "username"
+        ],
+        "type": "object"
+      },
       "UploadRelease": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
           "archiveBase64": {
+            "maxLength": 73400320,
+            "minLength": 1,
             "type": "string"
           },
           "maxHermesVersion": {
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "minHermesVersion": {
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notes": {
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^v?\\d+\\.\\d+\\.\\d+(?:-[a-z0-9.-]+)?$",
             "type": "string"
           }
         },
@@ -617,9 +1060,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteRelease"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
           },
           "401": {
             "description": "Authentication required"
@@ -969,6 +1429,16 @@
           "200": {
             "description": "Success; see the native API reference for payloads"
           },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
+          },
           "401": {
             "description": "Authentication required"
           },
@@ -1031,9 +1501,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkill"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
           },
           "401": {
             "description": "Authentication required"
@@ -1121,6 +1608,16 @@
           "200": {
             "description": "Success; see the native API reference for payloads"
           },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Release"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
+          },
           "401": {
             "description": "Authentication required"
           },
@@ -1185,9 +1682,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTarget"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
           },
           "401": {
             "description": "Authentication required"
@@ -1232,6 +1746,16 @@
         "responses": {
           "200": {
             "description": "Success; see the native API reference for payloads"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentResponse"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
           },
           "401": {
             "description": "Authentication required"
@@ -1311,7 +1835,14 @@
       "get": {
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMe"
+                }
+              }
+            },
+            "description": "Product-owned browser response"
           },
           "401": {
             "description": "Authentication required"

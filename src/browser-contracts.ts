@@ -56,34 +56,35 @@ export const DeploymentJob = z.object({
 export const DeploymentCapabilities = z.object({enabled:z.boolean(),executor:z.literal('magnus'),message:z.string()});
 export const ManagedDeployment = DeploymentJob.extend({manifest_json:z.string(),publication_sha256:z.string().regex(/^[a-f0-9]{64}$/),approval_expires_at:z.string(),approved_at:z.string().nullable(),magnus_job_id:z.string().nullable()});
 export const DeploymentApproval = z.object({publicationSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+const requiredText = (max:number) => z.string().max(max).trim().min(1);
+const optionalText = (max:number) => z.string().max(max).trim().nullable().optional();
 export const CreateSkill = z.object({
-  slug: z.string().min(1).max(63),
-  name: z.string().min(1).max(120),
-  description: z.string().min(1).max(5000),
-  homepage: z.string().nullable().optional(),
+  slug: requiredText(63).toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
+  name: requiredText(120),
+  description: requiredText(5000),
+  homepage: optionalText(2000),
   enabled: z.boolean().optional(),
 });
 export const UploadRelease = z.object({
-  version: z.string(),
-  archiveBase64: z.string(),
-  notes: z.string().optional(),
-  minHermesVersion: z.string().optional(),
-  maxHermesVersion: z.string().optional(),
+  version: requiredText(64).regex(/^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i),
+  archiveBase64: requiredText(70 * 1024 * 1024),
+  notes: optionalText(5000),
+  minHermesVersion: optionalText(64),
+  maxHermesVersion: optionalText(64),
 });
 export const EnrollTarget = z.object({
   channel: z.enum(['stable', 'canary']),
-  skills: z.array(z.string()).optional(),
+  skills: z.array(requiredText(63).toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,62}$/)).optional(),
 });
-export const browserSchemas = {
-  ManagedDeployment, DeploymentApproval, DeploymentCapabilities,
-  Skill,
-  Release,
-  Channel,
-  Target,
-  Audit,
-  Receipt,
-  DeploymentJob,
-  CreateSkill,
-  UploadRelease,
-  EnrollTarget,
+// Complete browser operations retain product ownership of writes and one-time credentials.
+export const UpdateSkill = z.object({ name:requiredText(120).optional(), description:requiredText(5000).optional(), homepage:optionalText(2000), enabled:z.boolean().optional() });
+export const UpdateTarget = z.object({host:requiredText(253).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),username:requiredText(32).regex(/^[a-z_][a-z0-9_-]*$/i),enabled:z.boolean().optional()});
+export const PromoteRelease = z.object({version:requiredText(64)});
+export const AuthMe = z.object({username:z.string(),isAdmin:z.boolean()});
+export const Ok = z.object({ok:z.literal(true)});
+export const EmptyResponse = z.null();
+export const EnrollmentResponse = z.object({target:z.string(),token:z.string(),oneTime:z.literal(true)});
+export const SkillList = z.array(Skill), ReleaseList=z.array(Release), ChannelList=z.array(Channel), TargetList=z.array(Target), AuditList=z.array(Audit), ReceiptList=z.array(Receipt), DeploymentJobList=z.array(DeploymentJob);
+export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
+  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse
 };

@@ -25,7 +25,9 @@
     "bootstrap": "npm ci --ignore-scripts && npm --prefix tooling/release ci --ignore-scripts && npm run hooks:install",
     "typecheck": "tsc --noEmit",
     "generate:openapi": "npm run build && node scripts/openapi.mjs --write",
-    "check:openapi": "npm run build && node scripts/openapi.mjs"
+    "check:openapi": "npm run build && node scripts/openapi.mjs",
+    "contracts:browser": "npm run build && node scripts/export-browser-contracts.mjs",
+    "check:browser": "npm run build && node scripts/export-browser-contracts.mjs --check"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",

@@ -7,6 +7,7 @@ import test from 'node:test';
 process.env.HIVE_AUTO_MIGRATE = 'true';
 process.env.HIVE_SKILLS_DATA_DIR = mkdtempSync(join(tmpdir(), 'hive-skills-app-test-'));
 process.env.HIVE_SKILLS_SESSION_SECRET = 'app-test-session-secret-0123456789abcdef';
+process.env.HIVE_SKILLS_ADMIN_USERS = 'admin';
 process.env.HIVE_SKILLS_PUBLIC_URL = 'https://registry.test:4030';
 process.env.HIVE_SKILLS_TARGETS = 'agent-1=deploy@agent-host.test';
 
@@ -96,4 +97,17 @@ test('session secrets are required outside loopback development', async () => {
   const first = resolveSessionSecret({}, '127.0.0.1');
   assert.equal(first.length >= 32, true);
   assert.notEqual(first, resolveSessionSecret({}, '127.0.0.1'));
+});
+
+
+test('owned browser request validation rejects malformed input before mutation',async()=>{
+ const {createSession}=await import('./auth.js');
+ const cookie='hive_skills_session='+createSession('admin');
+ const before=store.getTarget('agent-1');
+ const invalid=await app.request('https://registry.test/admin/targets/agent-1',{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({host:'host;command',username:'deploy'})});
+ assert.equal(invalid.status,400);assert.deepEqual(store.getTarget('agent-1'),before);
+ const update=await app.request('https://registry.test/admin/skills/fixture',{method:'PATCH',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({enabled:'yes'})});
+ assert.equal(update.status,400);
+ const valid=await app.request('https://registry.test/admin/skills/fixture',{method:'PATCH',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({description:' Updated fixture '})});
+ assert.equal(valid.status,200);assert.equal((await valid.json() as {description:string}).description,'Updated fixture');
 });

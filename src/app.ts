@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { page } from './ui.js';
 import type { AuthContext, Release } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
-import { Release as BrowserRelease } from './browser-contracts.js';
+import { Release as BrowserRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -85,6 +85,12 @@ const requireAuth = (admin = false): MiddlewareHandler<{ Variables: Variables }>
 };
 
 const requestJson = async (c: { req: { json: () => Promise<unknown> } }): Promise<JsonObject> => asObject(await c.req.json());
+
+const browserInput = <T>(schema:z.ZodType<T>, value:unknown):T => {
+  const result=schema.safeParse(value);
+  if(!result.success) throw new HTTPException(400,{message:'Invalid registry request'});
+  return result.data;
+};
 
 const archiveUrl = (skillSlug: string, release: Release, channel: string): string => {
   const base = `${config.publicUrl}/v1/skills/${skillSlug}/releases/${release.version}/archive`;
@@ -231,7 +237,7 @@ app.get('/admin/audit', requireAuth(true), (c) => {
 app.get('/admin/updates', requireAuth(true), async (c) => c.json(await updateStatus(metadata(releasePackageRoot).release, upgradeHome())));
 
 app.post('/admin/skills', requireAuth(true), async (c) => {
-  const body = await requestJson(c);
+  const body = browserInput(CreateSkill, await requestJson(c));
   const skill = store.createSkill({
     slug: slug(body.slug),
     name: text(body.name, 'name', 120),
@@ -244,7 +250,7 @@ app.post('/admin/skills', requireAuth(true), async (c) => {
 });
 
 app.patch('/admin/skills/:slug', requireAuth(true), async (c) => {
-  const body = await requestJson(c);
+  const body = browserInput(UpdateSkill, await requestJson(c));
   const skill = store.updateSkill(c.req.param('slug'), {
     name: body.name === undefined ? undefined : text(body.name, 'name', 120),
     description: body.description === undefined ? undefined : text(body.description, 'description', 5_000),
@@ -266,7 +272,7 @@ app.delete('/admin/skills/:slug', requireAuth(true), (c) => {
 app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   const skillId = c.req.param('slug');
   if (!store.getSkill(skillId)) throw new HTTPException(404, { message: 'Skill not found' });
-  const body = await requestJson(c);
+  const body = browserInput(UploadRelease, await requestJson(c));
   const version = text(body.version, 'version', 64);
   try {
     assertSkillId(skillId, version);
@@ -309,7 +315,7 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
     throw error;
   }
   store.audit(c.get('auth').username, 'release.create', `${skillId}@${version}`, { sha256: persisted.sha256, minHermesVersion, maxHermesVersion });
-  return c.json(release, 201);
+  return c.json(BrowserRelease.parse(release), 201);
 });
 
 app.get('/admin/channels', requireAuth(true), (c) => c.json(store.listChannels()));
@@ -317,7 +323,7 @@ app.get('/admin/receipts', requireAuth(true), (c) => c.json(store.listReceipts()
 
 app.put('/admin/channels/:channel/:slug', requireAuth(true), async (c) => {
   const channel = channelParam(c.req.param('channel'));
-  const body = await requestJson(c);
+  const body = browserInput(PromoteRelease, await requestJson(c));
   const version = text(body.version, 'version', 64);
   const skill = c.req.param('slug');
   if (!store.getRelease(skill, version)) throw new HTTPException(404, { message: 'Release not found' });
@@ -336,7 +342,7 @@ app.delete('/admin/channels/:channel/:slug', requireAuth(true), (c) => {
 app.get('/admin/targets', requireAuth(true), (c) => c.json(store.listTargets()));
 
 app.put('/admin/targets/:target', requireAuth(true), async (c) => {
-  const body = await requestJson(c);
+  const body = browserInput(UpdateTarget, await requestJson(c));
   const name = slug(c.req.param('target'));
   const host = text(body.host, 'host', 253);
   const username = text(body.username, 'username', 32);
@@ -353,7 +359,7 @@ app.put('/admin/targets/:target', requireAuth(true), async (c) => {
 app.post('/admin/targets/:target/enroll', requireAuth(true), async (c) => {
   const target = c.req.param('target');
   if (!store.getTarget(target)) throw new HTTPException(404, { message: 'Target not found' });
-  const body = await requestJson(c);
+  const body = browserInput(EnrollTarget, await requestJson(c));
   const channel = channelParam(text(body.channel, 'channel', 20));
   const skills = body.skills === undefined ? null : Array.isArray(body.skills) ? body.skills.map(slug) : null;
   if (body.skills !== undefined && skills === null) throw new HTTPException(400, { message: 'skills must be an array' });

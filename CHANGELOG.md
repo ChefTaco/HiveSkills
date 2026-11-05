@@ -1,5 +1,7 @@
 # Changelog
 
+- Export standalone product-owned browser validators, including exact request bounds, enrollment credentials and deployment responses. Validate administration writes against those same contracts and omit private archive paths from release creation replies.
+
 - Export reviewed public native client archives with exact file/runtime digests and preserved license notices for publisher-signed installer staging.
 
 - Revalidate native target authorization and the exact approved assignment before frozen deployments touch profile state. Disabled targets cannot approve or begin queued work.

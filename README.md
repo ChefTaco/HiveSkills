@@ -223,3 +223,10 @@ profiles or deployment environments and does not publish anything. Release
 maintainers must review the metadata and include it in a publisher-signed Hive
 manifest before an operator stages it. Node remains an explicitly selected,
 existing root-owned host prerequisite; the archive does not install a runtime.
+
+Browser contract consumers pin the reviewed `docs/browser-contracts.ts` candidate
+artifact by version and SHA256. `npm run contracts:browser` exports only the pure
+product-owned Zod module; `npm run check:browser` verifies source/export drift.
+The backend validates registry writes using the same request schemas. OpenAPI
+records these request and response shapes, while the standalone export preserves
+all Zod validation and normalization. Publication is a separate release action.

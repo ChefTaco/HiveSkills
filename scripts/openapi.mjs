@@ -1,4 +1,4 @@
-// Route inventory from the owning API source; full request/response schemas remain pending.
+// Product-owned route inventory and browser request/response contracts.
 import { readFileSync, writeFileSync } from 'node:fs';
 import ts from 'typescript';
 import { z } from 'zod';
@@ -95,6 +95,12 @@ for (const [path, method, schema] of [
       },
     },
   };
+}
+for (const [path,method,schema] of [['/admin/skills/{slug}','patch','UpdateSkill'],['/admin/targets/{target}','put','UpdateTarget'],['/admin/channels/{channel}/{slug}','put','PromoteRelease']]) {
+  paths[path][method].requestBody={required:true,content:{'application/json':{schema:{$ref:'#/components/schemas/'+schema}}}};
+}
+for (const [path,method,schema,status] of [['/auth/me','get','AuthMe',200],['/admin/targets/{target}/enroll','post','EnrollmentResponse',201],['/admin/targets/{target}','put','Ok',200],['/admin/channels/{channel}/{slug}','put','Ok',200],['/admin/skills','post','Skill',201],['/admin/skills/{slug}','patch','Skill',200],['/admin/skills/{slug}/releases','post','Release',201]]) {
+  paths[path][method].responses[status]={description:'Product-owned browser response',content:{'application/json':{schema:{$ref:'#/components/schemas/'+schema}}}};
 }
 const version = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
