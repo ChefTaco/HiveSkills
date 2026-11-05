@@ -1,15 +1,12 @@
 # HiveSkills
 
-Part of the Hive:Magnus ecosystem. This repository starts from a reviewed public
-Hive source snapshot; `provenance.json` records its revision and original hashes.
+HiveSkills is the Skills registry for agents: a digest-verified HTTPS archive API with immutable releases, release channels, assignments and audited distribution.
 
-Extraction is in progress. Existing client protocols and migration history are
-retained. The suite SSO/API cutover and production migration are not yet accepted.
-Do not replace an existing deployment using this source snapshot alone.
+It is one product in the [Hive:Magnus](https://github.com/ChefTaco/hive) suite, and it also runs on its own. The [Hive installer](https://github.com/ChefTaco/hive#readme) deploys tested combinations of the suite's products.
 
-# @hivemagnus/hive-skills
+This project was extracted from Hive with its migration history and client protocols intact. `provenance.json` records the source revision and original file hashes.
 
-`hive-skills` is the top-level Skills registry for Hermes Agents. It exposes a digest-verified HTTPS archive API, an OS-authenticated operator page, and a pull-side Hermes bridge. Hermes itself remains unmodified: each host gets a user systemd timer that syncs skill archives into `~/.hermes/skills/registry` and restarts the gateway only when content changes.
+It exposes a digest-verified HTTPS archive API, an OS-authenticated operator page, and a pull-side Hermes bridge. Hermes itself remains unmodified: each host gets a user systemd timer that syncs skill archives into `~/.hermes/skills/registry` and restarts the gateway only when content changes.
 
 The registry is intentionally small and local-first. SQLite records skills, releases, sessions, audit events, and deployment targets; archives live under the configured data directory. The initial catalog entry is **HiveMem**, based on the existing HiveMem Hermes plugin/skill source supplied at seed time.
 
@@ -19,7 +16,7 @@ Run `npx @hivemagnus/hive@^1.1.0 init --services all` to configure all four serv
 or select `--services skills` for this registry alone. The launcher generates private
 configuration, a strong session secret and TLS, and wires the Router's Skills panel.
 Skills OS/PAM administration remains separate from IAM sign-in. See the
-[launcher guide](../../packages/hive/README.md#include-hive-skills).
+[launcher guide](https://github.com/ChefTaco/hive/blob/main/packages/hive/README.md#include-hive-skills).
 
 ## Install from npm
 
@@ -67,7 +64,7 @@ for an intentional override. The package also ships `scripts/hermes-sync.mjs`,
 They work independently of the process working directory.
 
 For an existing systemd installation, follow the
-[npm migration runbook](../../docs/npm-deployments.md#optional-skills-registry).
+[npm migration runbook](https://github.com/ChefTaco/hive/blob/main/docs/npm-deployments.md#optional-skills-registry).
 Preserve that installation's environment, database, archives, release channels, target policies,
 credentials and service account. Back up first; do not seed a production migration.
 
