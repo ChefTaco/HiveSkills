@@ -10,33 +10,82 @@ It exposes a digest-verified HTTPS archive API, an OS-authenticated operator pag
 
 The registry is intentionally small and local-first. SQLite records skills, releases, sessions, audit events, and deployment targets; archives live under the configured data directory. The initial catalog entry is **HiveMem**, based on the existing HiveMem Hermes plugin/skill source supplied at seed time.
 
-## Install with the Hive launcher
+## Install
 
-Run `npx @hivemagnus/hive@^1.1.0 init --services all` to configure all four services,
-or select `--services skills` for this registry alone. The launcher generates private
-configuration, a strong session secret and TLS, and wires the Router's Skills panel.
-Skills OS/PAM administration remains separate from IAM sign-in. See the
-[launcher guide](https://github.com/ChefTaco/hive/blob/main/packages/hive/README.md#include-hive-skills).
+HiveSkills 1.3 ships only as a container image, `ghcr.io/cheftaco/hiveskills`, for
+`linux/amd64` and `linux/arm64`. Each release is tagged with its exact version (for example
+`1.3.1`; there is no `latest` tag), and its
+[GitHub release](https://github.com/ChefTaco/HiveSkills/releases) records the image digest.
 
-## Install from npm
+**With the Hive suite.** HiveSkills is normally installed by `hive.sh`, the
+[Hive suite controller](https://github.com/ChefTaco/hive#install-the-suite), in both the
+`core` and `full` profiles. The controller pins the image by digest from a signed release
+manifest and writes its configuration, secrets and TLS. In the suite, administrators sign in
+through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Hive 2.0.1
+pins HiveSkills 1.3.1.
 
-Requires Linux, Node.js 24.22.1+ or 26.13.0+, TLS certificates, and `pamtester` for
-OS-backed sign-in. SQLite is provided by Node; there are no native npm add-ons.
-Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user timer.
+**Legacy npm packages.** HiveSkills 1.3 is not published on npm. The npm package
+`@hivemagnus/hive-skills` (the name this source still uses), the `@hivemagnus/hive` launcher's
+`--services skills` option and the image `ghcr.io/cheftaco/hive-skills` are the legacy 1.x line
+from the Hive repository: `npm install` and `npx` resolve `@hivemagnus/hive-skills` to 1.2.2, not
+to this release. The [Hive README](https://github.com/ChefTaco/hive#legacy-npm-packages-1x)
+describes that line, and its
+[npm migration runbook](https://github.com/ChefTaco/hive/blob/main/docs/npm-deployments.md#optional-skills-registry)
+covers existing systemd installations of it.
+
+**On its own.** The registry always serves HTTPS, so mount a certificate and key that cover
+its public URL and are readable by the container's `node` user (uid 1000):
 
 ```bash
-npm install --prefix /opt/hive-skills/runtime @hivemagnus/hive-skills@1.2.0
-/opt/hive-skills/runtime/node_modules/.bin/hive-skills --env-file /opt/hive-skills/skills.env
+umask 077
+cat > skills.env <<EOF
+NODE_ENV=production
+HIVE_AUTO_MIGRATE=true
+HIVE_SKILLS_PUBLIC_URL=https://localhost:4030
+HIVE_SKILLS_DATA_DIR=/data/skills
+HIVE_SKILLS_SESSION_SECRET=$(openssl rand -hex 32)
+HIVE_SKILLS_ADMIN_USERS=admin
+HIVE_SKILLS_TLS_CERT_FILE=/config/tls/server.crt
+HIVE_SKILLS_TLS_KEY_FILE=/config/tls/server.key
+NODE_EXTRA_CA_CERTS=/config/tls/server.crt
+EOF
+
+docker run --rm -v hiveskills-data:/data -v "$PWD/tls:/config/tls:ro" \
+  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.3.1 check
+docker run -d --name hiveskills -p 127.0.0.1:4030:4030 -v hiveskills-data:/data \
+  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.3.1
+
+# Once it reports healthy
+curl --cacert tls/server.crt https://localhost:4030/healthz
+docker exec hiveskills node dist/cli.js seed    # optional: the bundled HiveMem skill
 ```
 
-Or run `npx @hivemagnus/hive-skills --env-file skills.env`. The CLI accepts `start`
-(the default), `seed`, `check`, `env-schema`, `migrate`, `upgrade`, `rollback`, `--help` and `--version`. `check` validates TLS,
-configuration and an existing database without creating or migrating state. `env-schema` prints
-configuration metadata without loading runtime configuration. Environment-file paths may be absolute;
-existing environment variables win. Without `--env-file`, the historical `./.env` lookup
-is retained. Help/version do not initialize storage. A fresh install starts with an empty
-catalog; startup never seeds or replaces existing records. Run `hive-skills migrate`
-explicitly before first startup, or enable `HIVE_AUTO_MIGRATE=true` with backup access.
+`tls/` holds `server.crt` and `server.key`. `NODE_EXTRA_CA_CERTS` lets the image's health
+check, which verifies certificates, trust a self-signed certificate; omit it for a
+certificate from a CA the image already trusts. Set `HIVE_SKILLS_DATA_DIR` as shown: the
+default, `./data`, is not writable inside the image. The image entry point is the CLI, so its
+commands follow the image name. The image does not include PAM (`pamtester`), so the OS-account
+sign-in described below is not available in a container; the public catalog, manifest and
+archive APIs work without it, and suite installations use Oathweave instead.
+[`docker-compose.example.yml`](docker-compose.example.yml) is the Compose example from the
+legacy 1.x line and defaults to the `ghcr.io/cheftaco/hive-skills` image.
+
+## CLI and configuration
+
+The CLI (`hive-skills`, or `node dist/cli.js` in the image and in a source build) accepts
+`start` (the default), `seed`, `check`, `env-schema`, `migrate`, `upgrade`, `rollback`,
+`--help` and `--version`. `check` validates TLS, configuration and an existing database
+without creating or migrating state. `env-schema` prints configuration metadata without
+loading runtime configuration. Environment-file paths may be absolute; existing environment
+variables win. Without `--env-file`, the historical `./.env` lookup is retained. Help/version
+do not initialize storage. A fresh install starts with an empty catalog; startup never seeds or
+replaces existing records. Run `hive-skills migrate` explicitly before first startup, or enable
+`HIVE_AUTO_MIGRATE=true` with backup access.
+
+Outside a container, the server needs Linux, Node.js 24.22.1+ or 26.13.0+, TLS certificates,
+and `pamtester` for OS-backed sign-in. SQLite is provided by Node; there are no native npm
+add-ons. Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user
+timer.
 
 Configure these values in a private environment file (mode 0600):
 
@@ -58,15 +107,10 @@ for the network where the registry is exposed and a certificate covering its pub
 The service account needs write access to the data directory and read access to its TLS files.
 Keep the session secret unchanged on upgrades to preserve active sessions.
 
-The packaged deployment helper is selected automatically; set `HIVE_SKILLS_DEPLOY_SCRIPT` only
-for an intentional override. The package also ships `scripts/hermes-sync.mjs`,
-`scripts/archive-utils.mjs`, `scripts/deploy-hermes-agent.sh` and the bundled seed source.
-They work independently of the process working directory.
-
-For an existing systemd installation, follow the
-[npm migration runbook](https://github.com/ChefTaco/hive/blob/main/docs/npm-deployments.md#optional-skills-registry).
-Preserve that installation's environment, database, archives, release channels, target policies,
-credentials and service account. Back up first; do not seed a production migration.
+The deployment helper is selected automatically; set `HIVE_SKILLS_DEPLOY_SCRIPT` only for an
+intentional override. `scripts/hermes-sync.mjs`, `scripts/archive-utils.mjs`,
+`scripts/deploy-hermes-agent.sh` and the bundled seed source work independently of the process
+working directory.
 
 ## Bring up the registry server
 
@@ -92,11 +136,7 @@ The bundled `registry-sources/hivemem` skill is the initial registry entry and d
 npm run seed
 ```
 
-For an npm install, run the same explicit operation with its CLI:
-
-```bash
-/opt/hive-skills/runtime/node_modules/.bin/hive-skills seed --env-file /opt/hive-skills/skills.env
-```
+With the container image, run `docker exec hiveskills node dist/cli.js seed`.
 
 The command validates and archives the bundled source as `hivemem` release `1.0.0` and promotes it to stable. Set `HIVEMEM_ARCHIVE` to seed a separately packaged replacement instead. Releases are immutable; later release and catalog CRUD operations are available to the OS-admin through the API.
 
@@ -149,19 +189,11 @@ releases cannot be downloaded. Promoted archives remain public within the
 registry's network boundary: target skill lists select distribution, they are
 not an archive confidentiality boundary.
 
-## Package verification
+## Releases
 
-From the repository, after building, run `npm run check:skills-install`. It packs the package,
-installs it into an empty temporary directory, and verifies CLI startup/seed, HTTPS, catalog,
-manifest, archive digests, authorization boundaries, a real bridge pull, a repeated pull, and
-persistence after restart. All data and the bridge profile are temporary; gateway restart is
-replaced by a counter. No production registry, OS account or gateway is changed.
-
-Run `npm run check:skills-install -- --registry` to repeat this against the exact published
-version in `package.json`. CI also checks the package allowlist and npm 12 installation.
-The package publishes from `.github/workflows/publish.yml` alongside the other packages;
-configure its npm trusted publisher for that workflow and the `npm-publish` environment after
-the initial authenticated publication.
+Pushing a `v*` tag runs `.github/workflows/release-image.yml`, which runs CI, builds the image
+for both architectures, publishes it to `ghcr.io/cheftaco/hiveskills` under its exact version
+with a build provenance attestation, and records the digest in a GitHub release.
 
 ## Managed upgrades
 
@@ -178,7 +210,6 @@ the selected deployment. When the service certificate uses a DNS name, set
 `HIVE_HEALTH_TLS_NAME` to that name and `NODE_EXTRA_CA_CERTS` to the approved CA
 bundle when needed. Probes retain certificate verification. Runtime state belongs
 in `/data`; mount only product-owned protected configuration in `/config`.
-Images are local candidates until registry publication and release acceptance.
 
 ### Approved deployments through Magnus
 
