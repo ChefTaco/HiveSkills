@@ -1,8 +1,7 @@
 import { readArchive } from "../scripts/archive-utils.mjs";
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { config } from './config.js';
 
 const safeVersion = (version: string): boolean => /^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(version);
