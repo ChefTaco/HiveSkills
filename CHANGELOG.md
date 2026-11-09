@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2 - 2026-11-09
+
+- Catalog entries without a promoted release explicitly return `release: null`. Clients can
+  explain that no release is available instead of failing response validation. Canary and
+  stable assignments remain independent.
+
 ## 1.3.1 - 2026-11-05
 
 ### Security

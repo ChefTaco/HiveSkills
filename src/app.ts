@@ -128,7 +128,7 @@ app.get('/v1/skills/:slug', (c) => {
   const release = store.channelRelease(channelParam(c.req.query('channel')), skill.slug);
   return c.json({
     ...skill,
-    release: release && { version: release.version, sha256: release.sha256, notes: release.notes, createdAt: release.createdAt },
+    release: release ? { version: release.version, sha256: release.sha256, notes: release.notes, createdAt: release.createdAt } : null,
   });
 });
 

@@ -111,3 +111,21 @@ test('owned browser request validation rejects malformed input before mutation',
  const valid=await app.request('https://registry.test/admin/skills/fixture',{method:'PATCH',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({description:' Updated fixture '})});
  assert.equal(valid.status,200);assert.equal((await valid.json() as {description:string}).description,'Updated fixture');
 });
+
+
+test('catalog details explicitly report no promoted release for each channel', async () => {
+  const slug = 'unpromoted-example';
+  store.createSkill({ slug, name: 'Example', description: 'Synthetic catalog fixture', homepage: null, enabled: true });
+  const detail = async (channel = 'stable') => {
+    const response = await app.request(`https://registry.test/v1/skills/${slug}?channel=${channel}`);
+    assert.equal(response.status, 200);
+    return await response.json() as { release: { version: string } | null };
+  };
+  assert.equal((await detail()).release, null);
+  store.addRelease({ skillSlug: slug, version: '1.0.0', sha256: 'e'.repeat(64), archivePath: '/tmp/synthetic-example.tgz', notes: null, createdAt: new Date().toISOString() });
+  store.promoteRelease(slug, '1.0.0', 'canary');
+  assert.equal((await detail()).release, null);
+  assert.equal((await detail('canary')).release?.version, '1.0.0');
+  store.withdrawRelease(slug, 'canary');
+  assert.equal((await detail('canary')).release, null);
+});
