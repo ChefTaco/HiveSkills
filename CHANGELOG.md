@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3] - 2026-11-10
+
+### Security
+
+- Run containers on a pinned, maintained Node 26 runtime with patched system libraries.
+- Replace the embedded SQLite driver with `@photostructure/sqlite` 3.3.1 (SQLite 3.54.1); retain existing databases, transaction ownership and recovery checks. Supported Linux x64 and arm64 installs include Node-API binaries and require no compiler or dependency install scripts.
+
 ## 1.3.2 - 2026-11-09
 
 - Catalog entries without a promoted release explicitly return `release: null`. Clients can

@@ -17,7 +17,7 @@ if (process.argv.includes('--copy')) {
   const result = spawnSync(process.execPath, [require.resolve('typescript/bin/tsc'), '-p', join(workspace, 'tsconfig.json'), '--emitDeclarationOnly'], {stdio:'inherit'});
   if (result.status !== 0) process.exit(result.status || 1);
   mkdirSync(out, {recursive:true});
-  await build({ entryPoints:[join(workspace,'src/index.ts')], outfile:join(out,'runtime.js'), bundle:true, format:'esm', platform:'node', target:'node24',  });
+  await build({ entryPoints:[join(workspace,'src/index.ts')], outfile:join(out,'runtime.js'), bundle:true, format:'esm', platform:'node', target:'node24', alias:{'node:sqlite':join(workspace,'src/sqlite-native.ts')} });
   for (const file of readdirSync(join(workspace,'dist')).filter(f=>f.endsWith('.d.ts')))
     copyFileSync(join(workspace,'dist',file), join(out,file==='index.d.ts'?'runtime.d.ts':file));
 }

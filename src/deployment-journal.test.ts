@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 import { initializeSchema } from './schema.js';
 import { DeploymentJournal, type Publication } from './deployment-journal.js';
 const manifest:Publication={schemaVersion:1,channel:'stable',skills:[{slug:'fixture-skill',version:'1.0.0',sha256:'a'.repeat(64)}]};

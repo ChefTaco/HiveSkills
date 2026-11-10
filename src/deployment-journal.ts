@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 import { HTTPException } from 'hono/http-exception';
 
 export type Publication = { schemaVersion: 1; channel: string; skills: Array<Record<string, unknown>> };
