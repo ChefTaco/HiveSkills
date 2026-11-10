@@ -1,6 +1,6 @@
 import { createHash, randomUUID, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 import { DeploymentJournal } from './deployment-journal.js';
 import { config } from './config.js';
 import { compatibleVersion } from './compatibility.js';

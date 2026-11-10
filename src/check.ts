@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:
 import { X509Certificate, createPrivateKey } from 'node:crypto';
 import { isIP } from 'node:net';
 import { dirname, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 
 /** Read-only preflight: never imports config/app/db, seeds, or creates state. */
 export function checkConfiguration(env: NodeJS.ProcessEnv): number {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 import { packageRoot, bundledDeployScript, bundledSeedSource } from './paths.js';
 
 const cli = resolve(packageRoot, 'dist/cli.js');
