@@ -21,8 +21,7 @@ HiveSkills 1.3 ships only as a container image, `ghcr.io/cheftaco/hiveskills`, f
 [Hive suite controller](https://github.com/ChefTaco/hive#install-the-suite), in both the
 `core` and `full` profiles. The controller pins the image by digest from a signed release
 manifest and writes its configuration, secrets and TLS. In the suite, administrators sign in
-through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Hive 2.0.1
-pins HiveSkills 1.3.1.
+through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins.
 
 **Legacy npm packages.** HiveSkills 1.3 is not published on npm. The npm package
 `@hivemagnus/hive-skills` (the name this source still uses), the `@hivemagnus/hive` launcher's
@@ -51,9 +50,9 @@ NODE_EXTRA_CA_CERTS=/config/tls/server.crt
 EOF
 
 docker run --rm -v hiveskills-data:/data -v "$PWD/tls:/config/tls:ro" \
-  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.3.1 check
+  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.3.3 check
 docker run -d --name hiveskills -p 127.0.0.1:4030:4030 -v hiveskills-data:/data \
-  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.3.1
+  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.3.3
 
 # Once it reports healthy
 curl --cacert tls/server.crt https://localhost:4030/healthz
