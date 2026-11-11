@@ -12,7 +12,7 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function buildNativeClient({output,url,nodeVersion=process.version,sourceRoot=root}){
  const selectedRoot=resolve(sourceRoot);
  const endpoint=new URL(url);if(endpoint.protocol!=='https:'||endpoint.username||endpoint.password||endpoint.search||endpoint.hash)throw Error('A public HTTPS artifact URL without credentials is required');
- if(!/^v(?:24\.22\.1|26\.13\.0)$/.test(nodeVersion))throw Error('Select an explicitly tested Node runtime version');
+ if(!/^v(?:24\.22\.3|26\.13\.1)$/.test(nodeVersion))throw Error('Select an explicitly tested Node runtime version');
  const destination=resolve(output);if(existsSync(destination))throw Error('Select a new private artifact directory');
  execFileSync('git',['-C',selectedRoot,'diff','--quiet','HEAD','--',...Object.values(nativeClientFiles)],{stdio:'pipe'});
  for(const path of Object.values(nativeClientFiles)){if(!lstatSync(join(selectedRoot,path)).isFile())throw Error('Reviewed native client inputs must be regular files');execFileSync('git',['-C',selectedRoot,'ls-files','--error-unmatch',path],{stdio:'pipe'})}

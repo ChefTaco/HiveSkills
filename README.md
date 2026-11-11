@@ -81,7 +81,7 @@ do not initialize storage. A fresh install starts with an empty catalog; startup
 replaces existing records. Run `hive-skills migrate` explicitly before first startup, or enable
 `HIVE_AUTO_MIGRATE=true` with backup access.
 
-Outside a container, the server needs Linux, Node.js 24.22.1+ or 26.13.0+, TLS certificates,
+Outside a container, the server needs Linux, Node.js 24.22.3+ or 26.13.1+, TLS certificates,
 and `pamtester` for OS-backed sign-in. SQLite is provided by Node; there are no native npm
 add-ons. Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user
 timer.
@@ -240,7 +240,7 @@ To prepare a native client artifact for a tested Hive release, run:
 ```bash
 node scripts/build-native-client.mjs --output /protected/new-client-artifact \
   --url https://artifacts.example.com/hiveskills-client-1.2.2.tar.gz \
-  --node-version v24.22.1
+  --node-version v24.22.3
 ```
 
 The exporter accepts only unchanged tracked client modules, LICENSE and NOTICE.
@@ -257,3 +257,10 @@ product-owned Zod module; `npm run check:browser` verifies source/export drift.
 The backend validates registry writes using the same request schemas. OpenAPI
 records these request and response shapes, while the standalone export preserves
 all Zod validation and normalization. Publication is a separate release action.
+
+## Native deployment runtime checks
+
+Source deployment checks the Node.js used by npm and `/usr/bin/node`, which the
+installed systemd service uses, against the current package `engines.node` policy.
+An unsupported runtime stops deployment before remote writes or service restarts.
+Update the system interpreter as well as any shell-specific Node.js installation.
