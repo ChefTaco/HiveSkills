@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.5.0] - 2026-11-12
 
 - Link deployment targets to the fleet with optional `magnusNodeId` and up to 64 unique `agentRefs` (`<magnusNodeId>~<profile>`) on `PUT /admin/targets/:name`. Omitted fields keep the stored link, so existing clients cannot erase it. Linked targets list both fields; unlinked targets are listed exactly as before. The additive `managed-format-3` migration stores links in a side table, leaving existing target rows and older binaries unaffected.
 - Add optional exact filters `GET /admin/targets?nodeId=` and `GET /admin/receipts?targetId=`. Responses without the parameters are unchanged; an invalid filter returns 400 in the existing error format. Browser contracts export `MagnusNodeId`, `AgentRef`, `TargetQuery` and `ReceiptQuery`.
