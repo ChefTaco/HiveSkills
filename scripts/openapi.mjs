@@ -110,6 +110,16 @@ for (const [path, name, description] of [
   paths[path].get.parameters = [{ name, in: 'query', required: false, description, schema: { type: 'string' } }];
   paths[path].get.responses[400] = { description: 'Invalid filter' };
 }
+// The standalone web UI is retired: / only points browsers to HiveXUI.
+paths['/'].get = {
+  summary: 'Retired web UI: HiveXUI stub page or redirect',
+  description:
+    'HiveXUI is the UI. Without HIVEXUI_URL this returns a static HTML page pointing to HiveXUI; with HIVEXUI_URL it redirects there.',
+  responses: {
+    200: { description: 'Stub page (HIVEXUI_URL unset)', content: { 'text/html': { schema: { type: 'string' } } } },
+    302: { description: 'Redirect to HIVEXUI_URL', headers: { Location: { schema: { type: 'string', format: 'uri' } } } },
+  },
+};
 const version = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).version;

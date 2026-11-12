@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- Retire the standalone web UI (`src/ui.ts`). HiveXUI is now the only UI for the Hive:Magnus product line, including HiveSkills. All API routes are unchanged.
+
+### Changed
+
+- `GET /` now serves a static page saying HiveSkills is managed in HiveXUI. Old bookmarks to the registry's web UI move to HiveXUI: set the new optional `HIVEXUI_URL` to have `/` redirect (`302`) there. An invalid `HIVEXUI_URL` (not an absolute http(s) URL, or one with credentials or a fragment) fails startup.
+
 ## [1.5.0] - 2026-11-12
 
 - Link deployment targets to the fleet with optional `magnusNodeId` and up to 64 unique `agentRefs` (`<magnusNodeId>~<profile>`) on `PUT /admin/targets/:name`. Omitted fields keep the stored link, so existing clients cannot erase it. Linked targets list both fields; unlinked targets are listed exactly as before. The additive `managed-format-3` migration stores links in a side table, leaving existing target rows and older binaries unaffected.

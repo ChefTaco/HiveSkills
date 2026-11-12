@@ -5,6 +5,10 @@ provenance.json and immutable database migration history. Never commit secrets,
 private infrastructure, databases, runtime state, local notes or real user data.
 Read AGENTS.local.md when present; never copy it into tracked content.
 
+This repository ships no web UI; HiveXUI is the UI for the Hive:Magnus product
+line. `/` only serves the HiveXUI stub page or a redirect to HIVEXUI_URL
+(src/hivexui-stub.ts). Do not add UI pages or assets here.
+
 Use strict TypeScript and runtime validation at API boundaries. Browser code must
 use public API contracts and must not import backend code or infrastructure
 credentials. Security behavior requires regression tests. Use Conventional Commits.

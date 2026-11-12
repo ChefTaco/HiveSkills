@@ -12,6 +12,8 @@ services:
       HIVE_SKILLS_ADMIN_USERS: ${HIVE_SKILLS_ADMIN_USERS:?configure the container PAM administrators}
       HIVE_SKILLS_TLS_KEY_FILE: /run/certs/server.key
       HIVE_SKILLS_TLS_CERT_FILE: /run/certs/server.crt
+      # Optional: redirect the retired web UI address (/) to HiveXUI.
+      HIVEXUI_URL: ${HIVEXUI_URL:-}
       HIVE_AUTO_MIGRATE: ${HIVE_AUTO_MIGRATE:-true}
       HIVE_UPDATE_CHECK: ${HIVE_UPDATE_CHECK:-false}
       HIVE_AUTO_UPGRADE: "false"

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { DeploymentTarget } from './types.js';
 import { bundledDeployScript } from './paths.js';
+import { parseHiveXuiUrl } from './hivexui-stub.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -58,6 +59,8 @@ export const config = {
   tlsCertFile: process.env.HIVE_SKILLS_TLS_CERT_FILE,
   deployScript: process.env.HIVE_SKILLS_DEPLOY_SCRIPT ?? bundledDeployScript,
   targets: parseTargets(process.env.HIVE_SKILLS_TARGETS),
+  /** HiveXUI address; retired UI paths redirect here when set, otherwise serve a stub page. */
+  hivexuiUrl: parseHiveXuiUrl(process.env.HIVEXUI_URL),
 } as const;
 
 export const requireProductionSecrets = (): void => {

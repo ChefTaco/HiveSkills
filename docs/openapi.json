@@ -987,18 +987,31 @@
   "paths": {
     "/": {
       "get": {
+        "description": "HiveXUI is the UI. Without HIVEXUI_URL this returns a static HTML page pointing to HiveXUI; with HIVEXUI_URL it redirects there.",
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Stub page (HIVEXUI_URL unset)"
           },
-          "401": {
-            "description": "Authentication required"
-          },
-          "403": {
-            "description": "Permission denied"
+          "302": {
+            "description": "Redirect to HIVEXUI_URL",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "format": "uri",
+                  "type": "string"
+                }
+              }
+            }
           }
         },
-        "summary": "GET /"
+        "summary": "Retired web UI: HiveXUI stub page or redirect"
       }
     },
     "/admin/audit": {
