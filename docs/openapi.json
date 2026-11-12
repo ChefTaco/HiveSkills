@@ -1870,6 +1870,22 @@
         "summary": "GET /health/live"
       }
     },
+    "/health/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success; see the native API reference for payloads"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "summary": "GET /health/ready"
+      }
+    },
     "/healthz": {
       "get": {
         "responses": {

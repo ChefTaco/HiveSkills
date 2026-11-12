@@ -1,5 +1,7 @@
 import { parseAccountLinks, linkedLocalId } from './account-links.js';
-import { configuredOathweaveVerifier } from './oathweave.js';
+import { configuredOathweaveVerifier } from './identity.js';
+import { createHealth } from '@hivemagnus/hive-common/health';
+import { requestContext } from '@hivemagnus/hive-common/hono';
 import { maintenanceActive } from './release/runtime.js';
 import { metadata } from './release/runtime.js';
 import { packageRoot as releasePackageRoot } from './paths.js';
@@ -73,7 +75,7 @@ const requireAuth = (admin = false): MiddlewareHandler<{ Variables: Variables }>
     try {username=linkedLocalId(accountLinks,identity);} catch {throw new HTTPException(403,{message:'An explicit registry account link is required'});}
     const isAdmin=config.adminUsers.has(username);
     if(admin && !isAdmin)throw new HTTPException(403,{message:'Local administrator access is required'});
-    if(c.req.method!=='GET' && c.req.path.startsWith('/admin/deployments')){if(!magnusExecutorConfiguration()){c.res=c.json({error:'DEPLOYMENT_ADAPTER_UNAVAILABLE',message:'Skill execution requires the Magnus job adapter'},503);return;}if(c.req.path.endsWith('/approve')&&(!identity.authenticatedAt||Date.now()-identity.authenticatedAt>300_000||identity.authenticatedAt>Date.now()+30_000))throw new HTTPException(403,{message:'Recent Oathweave authentication is required for exact one-use deployment approval'});}
+    if(c.req.method!=='GET' && c.req.path.startsWith('/admin/deployments')){if(!magnusExecutorConfiguration()){c.res=c.json({error:'DEPLOYMENT_ADAPTER_UNAVAILABLE',message:'Skill execution requires the Magnus job adapter'},503);return;}if(c.req.path.endsWith('/approve')&&(identity.authTime===undefined||Date.now()-identity.authTime*1000>300_000||identity.authTime*1000>Date.now()+30_000))throw new HTTPException(403,{message:'Recent Oathweave authentication is required for exact one-use deployment approval'});}
     c.set('auth',{username,isAdmin});
     await next(); return;
   }
@@ -97,6 +99,8 @@ const archiveUrl = (skillSlug: string, release: Release, channel: string): strin
   return channel === 'stable' ? base : `${base}?channel=${channel}`;
 };
 
+// Echo or assign x-request-id (and W3C trace context) on every response, maintenance included.
+app.use('*', requestContext());
 app.use('*', async (c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();});
 app.use('*', bodyLimit({ maxSize: 70 * 1024 * 1024 }));
 
@@ -111,6 +115,16 @@ app.use('*', async (c, next) => {
 
 app.get('/', (c) => c.html(page));
 app.get('/health/live', (c) => c.json({ ...metadata(releasePackageRoot), status: 'ok', service: 'hive-skills' }));
+const health = createHealth({
+  service: 'hive-skills',
+  version: metadata(releasePackageRoot).version,
+  checks: [{ name: 'database', check: () => { const { ready, missingArchives } = store.readiness(); return { ok: ready, details: { missingArchives } }; } }],
+});
+// Suite-standard readiness. /health/live and /healthz keep their historical bodies for existing probes.
+app.get('/health/ready', async (c) => {
+  const result = await health.ready();
+  return c.body(JSON.stringify(result.body), result.status, result.headers);
+});
 app.get('/healthz', (c) => {
   try {
     const health = store.readiness();

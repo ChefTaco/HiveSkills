@@ -129,3 +129,34 @@ test('catalog details explicitly report no promoted release for each channel', a
   store.withdrawRelease(slug, 'canary');
   assert.equal((await detail('canary')).release, null);
 });
+
+test('health endpoints keep legacy bodies and add suite-standard readiness', async () => {
+  const live = await app.request('https://registry.test/health/live');
+  assert.equal(live.status, 200);
+  const liveBody = await live.json() as Record<string, unknown>;
+  assert.equal(liveBody.status, 'ok');
+  assert.equal(liveBody.service, 'hive-skills');
+  assert.equal(liveBody.protocol, 1);
+  const legacy = await app.request('https://registry.test/healthz');
+  const legacyBody = await legacy.json() as Record<string, unknown>;
+  assert.ok(['ok', 'degraded'].includes(String(legacyBody.status)));
+  assert.equal(typeof legacyBody.missingArchives, 'number');
+  const ready = await app.request('https://registry.test/health/ready');
+  assert.equal(ready.status, legacy.status);
+  assert.equal(ready.headers.get('cache-control'), 'no-store');
+  const readyBody = await ready.json() as { status: string; service: string; checks: Record<string, { status: string; details?: { missingArchives?: number } }> };
+  assert.equal(readyBody.service, 'hive-skills');
+  assert.equal(readyBody.status, legacy.status === 200 ? 'ready' : 'not_ready');
+  assert.equal(readyBody.checks.database?.details?.missingArchives, legacyBody.missingArchives);
+});
+
+test('requests carry an x-request-id without changing error bodies', async () => {
+  const echoed = await app.request('https://registry.test/admin/skills', { headers: { 'x-request-id': 'fixture-request-1' } });
+  assert.equal(echoed.status, 401);
+  assert.equal(echoed.headers.get('x-request-id'), 'fixture-request-1');
+  assert.deepEqual(await echoed.json(), { error: 'Sign in is required' });
+  const correlated = await app.request('https://registry.test/healthz', { headers: { 'x-correlation-id': 'fixture-correlation-1' } });
+  assert.equal(correlated.headers.get('x-request-id'), 'fixture-correlation-1');
+  const generated = await app.request('https://registry.test/health/live');
+  assert.match(generated.headers.get('x-request-id') ?? '', /^[0-9a-f-]{36}$/);
+});
