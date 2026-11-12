@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.4.0] - 2026-11-12
 
 - Verify Oathweave access tokens with the shared `@hivemagnus/hive-common` verifier and run its conformance vectors in the test suite. Accepted principals, audience, permissions, account links and error responses are unchanged; the registry keeps zero clock tolerance, an online session check on every request and its required `roles` and `clientId` claims.
 - Add `GET /health/ready` with the suite-standard readiness body. `GET /healthz` and `GET /health/live` keep their existing responses.
