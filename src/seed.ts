@@ -19,7 +19,7 @@ if (!archive) {
   if (pack.status !== 0) throw new Error('Could not package the bundled HiveMem skill');
   archive = generatedArchive;
 }
-if (!store.getSkill('hivemem')) store.createSkill({ slug: 'hivemem', name: 'HiveMem', description: 'Persistent semantic memory tools and provider integration for Hermes Agents.', homepage: 'https://github.com/ChefTaco/hive/tree/main/services/hive-mem', enabled: true });
+if (!store.getSkill('hivemem')) store.createSkill({ slug: 'hivemem', name: 'HiveMem', description: 'Persistent semantic memory tools and provider integration for Hermes Agents.', homepage: 'https://github.com/ChefTaco/HiveMem', enabled: true });
 if (store.getRelease('hivemem', '1.0.0')) throw new Error('hivemem@1.0.0 already exists; releases are immutable');
 const persisted = persistArchiveFromFile('hivemem', '1.0.0', archive);
 if (generatedArchive) unlinkSync(generatedArchive);
