@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { after } from 'node:test';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { loadOathweaveVectors, runOathweaveConformance } from '@hivemagnus/hive-common/oathweave/conformance';
 
 const temporary = mkdtempSync(join(tmpdir(), 'skills-identity-test-'));
 process.env.HIVE_AUTO_MIGRATE = 'true';
@@ -41,16 +42,19 @@ const token = async (
   audience = 'hiveskills',
   permissions = ['hiveskills:read'],
   authenticatedAt?:number,
+  claims: Record<string, unknown> = {},
+  kid = 'test',
 ) =>
-  new SignJWT({
+  new SignJWT(Object.fromEntries(Object.entries({
     actorType: 'USER',
     sessionId: 'fake-session',
     clientId: 'hivexui-hiveskills',
     roles: ['SUPER_ADMIN'],
     permissions,
     ...(authenticatedAt===undefined?{}:{auth_time:authenticatedAt}),
-  })
-    .setProtectedHeader({ alg: 'RS256', kid: 'test' })
+    ...claims,
+  }).filter(([, value]) => value !== undefined)))
+    .setProtectedHeader({ alg: 'RS256', kid })
     .setSubject('fake-user')
     .setIssuer(process.env.OATHWEAVE_ISSUER!)
     .setAudience(audience)
@@ -156,6 +160,54 @@ test('direct deployment approval requires scoped permissions, exact digest, rece
   assert.equal((await send(approve,{publicationSha256:job.publication_sha256},now)).status,202);
   assert.equal((await send(approve,{publicationSha256:job.publication_sha256},now)).status,409);
  }finally{delete process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON}
+});
+
+test('the shared verifier meets the Oathweave conformance vectors', async () => {
+  const { createIdentityVerifier } = await import('./identity.js');
+  const verify = (value: string, ctx: { issuer: string; audience: string; jwksUrl: string; userinfoUrl: string; fetch: typeof fetch; nowMs: number }) =>
+    createIdentityVerifier(
+      { issuer: ctx.issuer, audience: ctx.audience, jwksUrl: ctx.jwksUrl, userinfoUrl: ctx.userinfoUrl },
+      { fetch: ctx.fetch, now: () => ctx.nowMs },
+    )(value);
+  const vectors = await loadOathweaveVectors();
+  // The registry accepts signed-in people only; client-credentials tokens are refused.
+  const userVectors = vectors.vectors.filter((vector) => vector.principal === 'user').map((vector) => vector.name);
+  const report = await runOathweaveConformance(verify, { only: userVectors, strictReasons: true });
+  assert.equal(report.failed, 0);
+  assert.ok(report.passed >= 11);
+  const service = vectors.vectors.find((vector) => vector.name === 'valid-service');
+  assert.ok(service);
+  const refused = await runOathweaveConformance(verify, {
+    vectors: { ...vectors, vectors: [{ ...service, expect: { outcome: 'reject', status: 401, reason: 'wrong_principal_kind' } }] },
+    strictReasons: true,
+  });
+  assert.equal(refused.passed, 1);
+});
+
+test('registry identity claims keep their historical requirements', async () => {
+  const read = async (value: string) =>
+    (await app.request('/admin/skills', { headers: { Authorization: 'Bearer ' + value } })).status;
+  assert.equal(await read(await token()), 200);
+  // An absent roles claim and an RFC 9068 client_id alone were never accepted here.
+  assert.equal(await read(await token('hiveskills', ['hiveskills:read'], undefined, { roles: undefined })), 401);
+  assert.equal(await read(await token('hiveskills', ['hiveskills:read'], undefined, { clientId: undefined, client_id: 'hivexui-hiveskills' })), 401);
+  assert.equal(await read(await token('hiveskills', ['hiveskills:read'], undefined, { actorType: 'SERVICE_ACCOUNT' })), 401);
+  // No clock tolerance: a token valid from the near future is refused.
+  assert.equal(await read(await token('hiveskills', ['hiveskills:read'], undefined, { nbf: Math.floor(Date.now() / 1000) + 10 })), 401);
+  // Any verifier refusal, including an unknown signing key, keeps the registry's 401 body.
+  const unknownKey = await app.request('/admin/skills', { headers: { Authorization: 'Bearer ' + (await token(undefined, undefined, undefined, {}, 'rotated')) } });
+  assert.equal(unknownKey.status, 401);
+  assert.deepEqual(await unknownKey.json(), { error: 'Invalid or revoked identity session' });
+});
+
+test('an unreachable key set refuses access', async () => {
+  const { createIdentityVerifier } = await import('./identity.js');
+  const verify = createIdentityVerifier(
+    { issuer: process.env.OATHWEAVE_ISSUER!, audience: 'hiveskills', jwksUrl: process.env.OATHWEAVE_JWKS_URL!, userinfoUrl: process.env.OATHWEAVE_USERINFO_URL! },
+    { fetch: async () => new Response('', { status: 502 }) },
+  );
+  // The shared verifier reports 503 jwks_unavailable; requireAuth still answers 401 as before.
+  await assert.rejects(verify(await token()), { reason: 'jwks_unavailable' });
 });
 
 test('revoked identity sessions cannot use registry APIs', async () => {

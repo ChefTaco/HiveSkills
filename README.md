@@ -163,7 +163,7 @@ registry installations do not synchronize Skills state.
 
 ## API overview
 
-- `GET /healthz` – unauthenticated readiness
+- `GET /healthz` – unauthenticated readiness (`GET /health/ready` returns the suite-standard body; `GET /health/live` is liveness)
 - `GET /v1/skills` / `GET /v1/skills/:slug` – public catalog
 - `GET /v1/agent/manifest` – Hermes pull manifest
 - `GET /v1/skills/:slug/releases/:version/archive[?channel=canary]` – archive payload, only for the release currently promoted on that channel (default `stable`)
