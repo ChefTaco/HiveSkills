@@ -1,6 +1,11 @@
 {
   "components": {
     "schemas": {
+      "AgentRef": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "pattern": "^[A-Za-z0-9._-]{1,128}~[A-Za-z0-9._-]{1,128}$",
+        "type": "string"
+      },
       "Audit": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -369,6 +374,11 @@
         ],
         "type": "object"
       },
+      "MagnusNodeId": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "pattern": "^[A-Za-z0-9._-]{1,128}$",
+        "type": "string"
+      },
       "ManagedDeployment": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -554,6 +564,17 @@
         },
         "type": "array"
       },
+      "ReceiptQuery": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "targetId": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "Release": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -734,10 +755,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
+          "agentRefs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "enabled": {
             "type": "boolean"
           },
           "host": {
+            "type": "string"
+          },
+          "magnusNodeId": {
             "type": "string"
           },
           "name": {
@@ -760,10 +790,19 @@
         "items": {
           "additionalProperties": false,
           "properties": {
+            "agentRefs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "enabled": {
               "type": "boolean"
             },
             "host": {
+              "type": "string"
+            },
+            "magnusNodeId": {
               "type": "string"
             },
             "name": {
@@ -782,6 +821,17 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "TargetQuery": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "nodeId": {
+            "pattern": "^[A-Za-z0-9._-]{1,128}$",
+            "type": "string"
+          }
+        },
+        "type": "object"
       },
       "UpdateSkill": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -818,6 +868,14 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
+          "agentRefs": {
+            "items": {
+              "pattern": "^[A-Za-z0-9._-]{1,128}~[A-Za-z0-9._-]{1,128}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -826,6 +884,17 @@
             "minLength": 1,
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.-]*$",
             "type": "string"
+          },
+          "magnusNodeId": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._-]{1,128}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "username": {
             "maxLength": 32,
@@ -1349,6 +1418,17 @@
     },
     "/admin/receipts": {
       "get": {
+        "parameters": [
+          {
+            "description": "Only receipts for exactly this deployment target name",
+            "in": "query",
+            "name": "targetId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1362,6 +1442,9 @@
               }
             },
             "description": "Authorized product records"
+          },
+          "400": {
+            "description": "Invalid filter"
           },
           "401": {
             "description": "Authentication required"
@@ -1638,6 +1721,17 @@
     },
     "/admin/targets": {
       "get": {
+        "parameters": [
+          {
+            "description": "Only targets bound to exactly this Magnus node id",
+            "in": "query",
+            "name": "nodeId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1651,6 +1745,9 @@
               }
             },
             "description": "Authorized product records"
+          },
+          "400": {
+            "description": "Invalid filter"
           },
           "401": {
             "description": "Authentication required"

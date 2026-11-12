@@ -102,6 +102,14 @@ for (const [path,method,schema] of [['/admin/skills/{slug}','patch','UpdateSkill
 for (const [path,method,schema,status] of [['/auth/me','get','AuthMe',200],['/admin/targets/{target}/enroll','post','EnrollmentResponse',201],['/admin/targets/{target}','put','Ok',200],['/admin/channels/{channel}/{slug}','put','Ok',200],['/admin/skills','post','Skill',201],['/admin/skills/{slug}','patch','Skill',200],['/admin/skills/{slug}/releases','post','Release',201]]) {
   paths[path][method].responses[status]={description:'Product-owned browser response',content:{'application/json':{schema:{$ref:'#/components/schemas/'+schema}}}};
 }
+// Optional, additive list filters; omitting them returns the historical listing.
+for (const [path, name, description] of [
+  ['/admin/targets', 'nodeId', 'Only targets bound to exactly this Magnus node id'],
+  ['/admin/receipts', 'targetId', 'Only receipts for exactly this deployment target name'],
+]) {
+  paths[path].get.parameters = [{ name, in: 'query', required: false, description, schema: { type: 'string' } }];
+  paths[path].get.responses[400] = { description: 'Invalid filter' };
+}
 const version = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).version;

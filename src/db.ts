@@ -4,7 +4,7 @@ import { DatabaseSync } from './sqlite.js';
 import { DeploymentJournal } from './deployment-journal.js';
 import { config } from './config.js';
 import { compatibleVersion } from './compatibility.js';
-import type { DeploymentTarget, Release, Session, Skill } from './types.js';
+import type { DeploymentTarget, ListedTarget, Release, Session, Skill, TargetBinding } from './types.js';
 if (!existsSync(config.databasePath)) throw new Error('Skills database is missing; run hive-skills migrate before opening storage');
 const db = new DatabaseSync(config.databasePath, { enableForeignKeyConstraints: true });
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -13,6 +13,7 @@ type SkillRow = { slug: string; name: string; description: string; homepage: str
 type ReleaseRow = { skill_slug: string; version: string; sha256: string; archive_path: string; notes: string | null; min_hermes_version: string | null; max_hermes_version: string | null; created_at: string };
 type SessionRow = { id: string; username: string; expires_at: string };
 type TargetRow = { name: string; host: string; username: string; enabled: number };
+type ListedTargetRow = TargetRow & { magnus_node_id: string | null; agent_refs_json: string | null };
 const now = (): string => new Date().toISOString();
 const mapSkill = (row: SkillRow): Skill => ({ slug: row.slug, name: row.name, description: row.description, homepage: row.homepage, enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at });
 const mapRelease = (row: ReleaseRow): Release => ({ skillSlug: row.skill_slug, version: row.version, sha256: row.sha256, archivePath: row.archive_path, notes: row.notes, minHermesVersion: row.min_hermes_version, maxHermesVersion: row.max_hermes_version, createdAt: row.created_at });
@@ -78,17 +79,37 @@ export const store = {
     return policy ? { channel: policy.channel, skills: policy.skills_json ? JSON.parse(policy.skills_json) as string[] : undefined } : null;
   },
   recordReceipt: (target: string, receipt: unknown) => db.prepare('UPDATE target_policies SET receipt_json=?,updated_at=? WHERE target=?').run(JSON.stringify(receipt), now(), target),
-  listReceipts: () => db.prepare('SELECT target,channel,skills_json,receipt_json,updated_at FROM target_policies').all(),
+  listReceipts: (targetId?: string) => targetId === undefined
+    ? db.prepare('SELECT target,channel,skills_json,receipt_json,updated_at FROM target_policies').all()
+    : db.prepare('SELECT target,channel,skills_json,receipt_json,updated_at FROM target_policies WHERE target=?').all(targetId),
   createSession: (session: Session): void => { db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?)').run(session.id, session.username, session.expiresAt, now()); },
   getSession: (id: string): Session | undefined => { db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now()); const row = db.prepare('SELECT id, username, expires_at FROM sessions WHERE id=?').get(id) as SessionRow | undefined; return row && { id: row.id, username: row.username, expiresAt: row.expires_at }; },
   deleteSession: (id: string): void => { db.prepare('DELETE FROM sessions WHERE id=?').run(id); },
-  listTargets: (): DeploymentTarget[] => (db.prepare('SELECT * FROM deployment_targets ORDER BY name').all() as TargetRow[]).map((row) => ({ ...row, enabled: Boolean(row.enabled) })),
-  saveTarget: (target: DeploymentTarget): void => {
+  // Fleet fields appear only on bound targets, so legacy target listings are unchanged.
+  listTargets: (nodeId?: string): ListedTarget[] => {
+    const select = 'SELECT t.name,t.host,t.username,t.enabled,b.magnus_node_id,b.agent_refs_json FROM deployment_targets t LEFT JOIN target_agent_links b ON b.target=t.name';
+    const rows = (nodeId === undefined ? db.prepare(`${select} ORDER BY t.name`).all() : db.prepare(`${select} WHERE b.magnus_node_id=? ORDER BY t.name`).all(nodeId)) as ListedTargetRow[];
+    return rows.map((row) => {
+      const target: ListedTarget = { name: row.name, host: row.host, username: row.username, enabled: Boolean(row.enabled) };
+      if (row.magnus_node_id) target.magnusNodeId = row.magnus_node_id;
+      const agentRefs = row.agent_refs_json ? JSON.parse(row.agent_refs_json) as string[] : [];
+      if (agentRefs.length) target.agentRefs = agentRefs;
+      return target;
+    });
+  },
+  targetBinding: (name: string): TargetBinding | undefined => {
+    const row = db.prepare('SELECT magnus_node_id,agent_refs_json FROM target_agent_links WHERE target=?').get(name) as { magnus_node_id: string | null; agent_refs_json: string } | undefined;
+    return row?.magnus_node_id ? { magnusNodeId: row.magnus_node_id, agentRefs: JSON.parse(row.agent_refs_json) as string[] } : undefined;
+  },
+  /** An undefined binding keeps the stored fleet binding; null clears it. */
+  saveTarget: (target: DeploymentTarget, binding?: TargetBinding | null): void => {
     const prior = db.prepare('SELECT * FROM deployment_targets WHERE name=?').get(target.name) as TargetRow | undefined;
     db.exec('BEGIN IMMEDIATE');
     try {
       if (prior && (prior.host !== target.host || prior.username !== target.username || !target.enabled)) db.prepare('DELETE FROM target_policies WHERE target=?').run(target.name);
       db.prepare('INSERT INTO deployment_targets VALUES (?,?,?,?) ON CONFLICT(name) DO UPDATE SET host=excluded.host,username=excluded.username,enabled=excluded.enabled').run(target.name, target.host, target.username, Number(target.enabled));
+      if (binding === null) db.prepare('DELETE FROM target_agent_links WHERE target=?').run(target.name);
+      else if (binding) db.prepare('INSERT INTO target_agent_links VALUES (?,?,?,?) ON CONFLICT(target) DO UPDATE SET magnus_node_id=excluded.magnus_node_id,agent_refs_json=excluded.agent_refs_json,updated_at=excluded.updated_at').run(target.name, binding.magnusNodeId, JSON.stringify(binding.agentRefs), now());
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   },

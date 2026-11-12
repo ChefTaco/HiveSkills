@@ -244,6 +244,14 @@
         "impact": "fast",
         "readableBy": "^1.2.2",
         "note": "Add durable exact-publication deployment approvals and Magnus receipt references without altering legacy jobs."
+      },
+      {
+        "component": "skills",
+        "id": "managed-format-3",
+        "checksum": "f0e4ce285573b35b41865eb979dc2959b345342b3450604d7e43d68d969c792f",
+        "impact": "fast",
+        "readableBy": "^1.1.0",
+        "note": "Add optional Magnus node and agent reference bindings for deployment targets in a side table; legacy target rows and older binaries are unaffected."
       }
     ],
     "wireCompatibility": {

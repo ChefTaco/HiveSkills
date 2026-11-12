@@ -24,12 +24,21 @@ export const Channel = z.object({
   skill_slug: z.string(),
   version: z.string(),
 });
+// Fleet join keys: a Magnus node id and `<magnusNodeId>~<profile>` agent references.
+const fleetRefPart = '[A-Za-z0-9._-]{1,128}';
+export const MagnusNodeId = z.string().regex(new RegExp(`^${fleetRefPart}$`));
+export const AgentRef = z.string().regex(new RegExp(`^${fleetRefPart}~${fleetRefPart}$`));
+export const maxAgentRefs = 64;
 export const Target = z.object({
   name: z.string(),
   host: z.string(),
   username: z.string(),
   enabled: z.boolean(),
+  // Present only for targets bound to a Magnus node; legacy targets omit both.
+  magnusNodeId: z.string().optional(),
+  agentRefs: z.array(z.string()).optional(),
 });
+export const TargetQuery = z.object({ nodeId: MagnusNodeId.optional() });
 export const Audit = z.object({
   id: z.number(),
   actor: z.string(),
@@ -45,6 +54,7 @@ export const Receipt = z.object({
   receipt_json: z.string().nullable(),
   updated_at: z.string(),
 });
+export const ReceiptQuery = z.object({ targetId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/).optional() });
 export const DeploymentJob = z.object({
   id: z.string(),
   target: z.string(),
@@ -79,7 +89,8 @@ export const EnrollTarget = z.object({
 });
 // Complete browser operations retain product ownership of writes and one-time credentials.
 export const UpdateSkill = z.object({ name:requiredText(120).optional(), description:requiredText(5000).optional(), homepage:optionalText(2000), enabled:z.boolean().optional() });
-export const UpdateTarget = z.object({host:requiredText(253).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),username:requiredText(32).regex(/^[a-z_][a-z0-9_-]*$/i),enabled:z.boolean().optional()});
+// Omitted fleet fields keep the stored binding; null or [] clears it. Agent references must belong to magnusNodeId.
+export const UpdateTarget = z.object({host:requiredText(253).regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/),username:requiredText(32).regex(/^[a-z_][a-z0-9_-]*$/i),enabled:z.boolean().optional(),magnusNodeId:MagnusNodeId.nullable().optional(),agentRefs:z.array(AgentRef).max(maxAgentRefs).optional()});
 export const PromoteRelease = z.object({version:requiredText(64)});
 export const AuthMe = z.object({username:z.string(),isAdmin:z.boolean()});
 export const Ok = z.object({ok:z.literal(true)});
@@ -87,9 +98,12 @@ export const EmptyResponse = z.null();
 export const EnrollmentResponse = z.object({target:z.string(),token:z.string(),oneTime:z.literal(true)});
 export const SkillList = z.array(Skill), ReleaseList=z.array(Release), ChannelList=z.array(Channel), TargetList=z.array(Target), AuditList=z.array(Audit), ReceiptList=z.array(Receipt), DeploymentJobList=z.array(DeploymentJob);
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
-  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse
+  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse,
+  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery
 };
 
+export const AgentRefSchema=AgentRef;
+export type AgentRef=z.infer<typeof AgentRef>;
 export const AuditSchema=Audit;
 export type Audit=z.infer<typeof Audit>;
 export const AuditListSchema=AuditList;
@@ -116,6 +130,8 @@ export const EnrollTargetSchema=EnrollTarget;
 export type EnrollTarget=z.input<typeof EnrollTarget>;
 export const EnrollmentResponseSchema=EnrollmentResponse;
 export type EnrollmentResponse=z.infer<typeof EnrollmentResponse>;
+export const MagnusNodeIdSchema=MagnusNodeId;
+export type MagnusNodeId=z.infer<typeof MagnusNodeId>;
 export const ManagedDeploymentSchema=ManagedDeployment;
 export type ManagedDeployment=z.infer<typeof ManagedDeployment>;
 export const OkSchema=Ok;
@@ -126,6 +142,8 @@ export const ReceiptSchema=Receipt;
 export type Receipt=z.infer<typeof Receipt>;
 export const ReceiptListSchema=ReceiptList;
 export type ReceiptList=z.infer<typeof ReceiptList>;
+export const ReceiptQuerySchema=ReceiptQuery;
+export type ReceiptQuery=z.infer<typeof ReceiptQuery>;
 export const ReleaseSchema=Release;
 export type Release=z.infer<typeof Release>;
 export const ReleaseListSchema=ReleaseList;
@@ -138,6 +156,8 @@ export const TargetSchema=Target;
 export type Target=z.infer<typeof Target>;
 export const TargetListSchema=TargetList;
 export type TargetList=z.infer<typeof TargetList>;
+export const TargetQuerySchema=TargetQuery;
+export type TargetQuery=z.infer<typeof TargetQuery>;
 export const UpdateSkillSchema=UpdateSkill;
 export type UpdateSkill=z.input<typeof UpdateSkill>;
 export const UpdateTargetSchema=UpdateTarget;
