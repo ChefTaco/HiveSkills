@@ -981,7 +981,7 @@
   "info": {
     "description": "Owned route inventory. Request/response schema completeness is an open acceptance gate.",
     "title": "HiveSkills API route inventory",
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "openapi": "3.1.0",
   "paths": {
