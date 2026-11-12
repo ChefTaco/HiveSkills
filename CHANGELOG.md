@@ -4,7 +4,7 @@
 
 ### Added
 
-- `GET /v1/audit/export`, the suite audit export for Cindertrace: every stored audit record as a HiveAuditRecord v1 (`hiveskills:audit:<id>`), oldest first by id with opaque `after` cursors and `limit` 1 to 200 (default 100), and no retention window. Oathweave service tokens need the new `hiveskills:audit:read` permission; registry administrators are accepted as before. Records about deployment targets carry the target's Magnus node and agent in `subject`; details are redacted flat scalars of at most 4 KB, and session ids are never exported. No storage change. `GET /admin/audit` is unchanged. OpenAPI and browser contracts add `HiveAuditRecord`, `HiveAuditPage` and `HiveAuditQuery`.
+- `GET /v1/audit/export`, the suite audit export for Cindertrace: every stored audit record as a HiveAuditRecord v1 (`hiveskills:audit:<id>`), oldest first by id with opaque `after` cursors and `limit` 1 to 200 (default 100), and no retention window. `nextCursor` is the last record's cursor even on the final page and `null` only when a page is empty. Oathweave service tokens need the new `hiveskills:audit:read` permission; registry administrators are accepted as before. Records about deployment targets carry the target's Magnus node and agent in `subject`; details are redacted flat scalars of at most 4 KB, and session ids are never exported. No storage change. `GET /admin/audit` is unchanged. OpenAPI and browser contracts add `HiveAuditRecord`, `HiveAuditPage` and `HiveAuditQuery`.
 - Optional `OATHWEAVE_NATIVE_ISSUERS` to accept service tokens signed with Oathweave's native issuer.
 
 ## [1.6.0] - 2026-11-12

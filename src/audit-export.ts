@@ -1,5 +1,5 @@
 // Suite audit export: HiveAuditRecord v1 pages over the registry audit log; Apache-2.0.
-import { decodeCursor, encodeCursor, feedPage, type Page } from '@hivemagnus/hive-common/events';
+import { decodeCursor, encodeCursor, type Page } from '@hivemagnus/hive-common/events';
 import { redact } from '@hivemagnus/hive-common/log';
 import { HiveAuditRecord } from './browser-contracts.js';
 import type { z } from 'zod';
@@ -119,16 +119,19 @@ export function auditRecord(row: AuditExportRow): HiveAuditRecordValue | null {
 }
 
 /**
- * One export page, oldest first by id. `rows` holds up to `limit + 1` rows after the cursor;
- * the cursor always advances past rows read, so a row that cannot be mapped is skipped and counted.
+ * One export page, oldest first by id. `rows` holds up to `limit` rows after the cursor.
+ * `nextCursor` is the cursor of the last row read, even on the final page, and null only when
+ * no rows were read (caught up). A row that cannot be mapped is skipped and counted, and the
+ * cursor still moves past it.
  */
 export function auditExportPage(rows: readonly AuditExportRow[], limit: number, onDropped: (count: number) => void = () => {}): Page<HiveAuditRecordValue> {
-  const page = feedPage(rows, limit, (row) => encodeAuditCursor(row.id));
+  const read = rows.slice(0, limit);
   const data: HiveAuditRecordValue[] = [];
-  for (const row of page.data) {
+  for (const row of read) {
     const record = auditRecord(row);
     if (record) data.push(record);
   }
-  if (data.length !== page.data.length) onDropped(page.data.length - data.length);
-  return { data, nextCursor: page.nextCursor };
+  if (data.length !== read.length) onDropped(read.length - data.length);
+  const last = read.at(-1);
+  return { data, nextCursor: last ? encodeAuditCursor(last.id) : null };
 }

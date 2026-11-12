@@ -131,7 +131,7 @@ paths['/v1/hive/events'].get = {
 paths['/v1/audit/export'].get = {
   summary: 'HiveAuditRecord v1 export of the registry audit log',
   description:
-    'Every stored audit record, oldest first by id, with no retention window. Pass nextCursor as after to read on; a null nextCursor means caught up. Oathweave service (client-credentials) tokens need hiveskills:audit:read; registry administrators are also accepted.',
+    'Every stored audit record, oldest first by id, with no retention window. nextCursor is the cursor of the last record, even on the final page; poll it again later. A null nextCursor (empty data) means caught up. Oathweave service (client-credentials) tokens need hiveskills:audit:read; registry administrators are also accepted.',
   security: [{ resourceBearer: [] }, { nativeSession: [] }],
   parameters: [
     { name: 'after', in: 'query', required: false, description: 'Opaque cursor from a previous page', schema: { type: 'string' } },

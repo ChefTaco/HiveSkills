@@ -196,6 +196,21 @@ test('pages oldest first by id with stable ids and a cursor round trip', async (
   assert.deepEqual(last, { data: [], nextCursor: null });
 });
 
+test('the final page still returns its last cursor, which picks up later records', async () => {
+  const full = await read('?limit=200');
+  const lastId = Number(full.data.at(-1)!.id.split(':')[2]);
+  assert.equal(full.nextCursor, encodeCursor({ i: lastId }));
+  assert.deepEqual(await read(`?after=${full.nextCursor}`), { data: [], nextCursor: null });
+  audit('admin', 'skill.update', 'later', {});
+  const later = await read(`?after=${full.nextCursor}`);
+  assert.deepEqual(later.data.map((record) => record.target?.id), ['later']);
+  assert.equal(later.nextCursor, encodeCursor({ i: Number(later.data[0]!.id.split(':')[2]) }));
+  // A page whose only row is unmappable still moves the cursor past it.
+  const bad = Number((db.prepare("SELECT id FROM audit_log WHERE created_at='not-a-date'").get() as { id: number }).id);
+  assert.deepEqual(await read(`?limit=1&after=${encodeCursor({ i: bad - 1 })}`), { data: [], nextCursor: encodeCursor({ i: bad }) });
+  assert.equal(HiveAuditRecord.safeParse({ ...full.data[0]!, id: 'hiveskills:audit:1 2' }).success, false);
+});
+
 test('limit bounds and malformed cursors', async () => {
   // Start after the seeded rows (one has an unreadable timestamp) so every bulk row is mappable.
   const start = encodeCursor({ i: Number((db.prepare('SELECT max(id) AS id FROM audit_log').get() as { id: number }).id) });

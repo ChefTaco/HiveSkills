@@ -117,7 +117,7 @@ export const HiveEventPage = z.object({ data: z.array(HiveEvent), nextCursor: z.
 // HiveAuditRecord v1 (GET /v1/audit/export), the suite audit export record shared unchanged across products.
 const auditScalar = z.union([z.string(), z.number(), z.boolean()]);
 export const HiveAuditRecord = z.object({
-  id: z.string().min(1).max(256).regex(/^(hivemem|hiveskills|ardentstudio|embermend):audit:[^\s]+$/),
+  id: z.string().min(1).max(256).regex(/^(hivemem|hiveskills|ardentstudio|embermend):audit:[A-Za-z0-9._:-]{1,200}$/),
   product: z.enum(['hivemem', 'hiveskills', 'ardentstudio', 'embermend']),
   occurredAt: z.iso.datetime(),
   action: z.string().max(128).regex(/^[a-z0-9_]+(?:\.[a-z0-9_]+)+$/),

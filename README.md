@@ -240,8 +240,9 @@ Actions are `session.login`, `session.logout`, `skill.create`, `skill.update`,
 deployment target carry its fleet link in `subject` (`nodeId`, and `agentRef` when
 the target names exactly one agent). `details` holds redacted flat scalars only (at
 most 4 KB); session ids and archive contents are never exported. `limit` is 1 to 200
-(default 100); a malformed cursor or limit returns 400. Pass `nextCursor` as `after`;
-`null` means caught up. `GET /admin/audit` is unchanged.
+(default 100); a malformed cursor or limit returns 400. Pass `nextCursor` as `after`.
+It is the last record's cursor even on the final page, so store it and poll it again
+later; it is `null` only when `data` is empty (caught up). `GET /admin/audit` is unchanged.
 
 ## Releases
 

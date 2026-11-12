@@ -395,7 +395,7 @@ app.get('/v1/audit/export', requireAuditReader, (c) => {
   } catch {
     throw new HTTPException(400, { message: 'Invalid audit export query' });
   }
-  const page = auditExportPage(store.auditExportRows(afterId, limit + 1), limit,
+  const page = auditExportPage(store.auditExportRows(afterId, limit), limit,
     (count) => console.warn(`audit export: skipped ${count} unmappable record(s)`));
   c.header('Cache-Control', 'no-store');
   return c.json(page);
