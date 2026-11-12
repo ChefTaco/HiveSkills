@@ -188,6 +188,15 @@ releases cannot be downloaded. Promoted archives remain public within the
 registry's network boundary: target skill lists select distribution, they are
 not an archive confidentiality boundary.
 
+A target can optionally be linked to the fleet: `PUT /admin/targets/:name` also
+accepts `magnusNodeId` (`[A-Za-z0-9._-]{1,128}`) and `agentRefs`, up to 64 unique
+`<magnusNodeId>~<profile>` references on that node. Omitting both keeps the stored
+link; `magnusNodeId: null` clears it and `agentRefs: []` clears only the agents.
+Linked targets list these fields; unlinked targets are listed exactly as before.
+`GET /admin/targets?nodeId=<magnusNodeId>` returns only targets linked to exactly
+that node, and `GET /admin/receipts?targetId=<name>` returns only that target's
+receipts. Without the parameters both listings are unchanged.
+
 ## Releases
 
 Pushing a `v*` tag runs `.github/workflows/release-image.yml`, which runs CI, builds the image

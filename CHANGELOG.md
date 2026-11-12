@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Link deployment targets to the fleet with optional `magnusNodeId` and up to 64 unique `agentRefs` (`<magnusNodeId>~<profile>`) on `PUT /admin/targets/:name`. Omitted fields keep the stored link, so existing clients cannot erase it. Linked targets list both fields; unlinked targets are listed exactly as before. The additive `managed-format-3` migration stores links in a side table, leaving existing target rows and older binaries unaffected.
+- Add optional exact filters `GET /admin/targets?nodeId=` and `GET /admin/receipts?targetId=`. Responses without the parameters are unchanged; an invalid filter returns 400 in the existing error format. Browser contracts export `MagnusNodeId`, `AgentRef`, `TargetQuery` and `ReceiptQuery`.
+
 ## [1.4.0] - 2026-11-12
 
 - Verify Oathweave access tokens with the shared `@hivemagnus/hive-common` verifier and run its conformance vectors in the test suite. Accepted principals, audience, permissions, account links and error responses are unchanged; the registry keeps zero clock tolerance, an online session check on every request and its required `roles` and `clientId` claims.

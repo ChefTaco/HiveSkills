@@ -19,9 +19,9 @@ import { requireMagnusExecutor, executeMagnusJob, magnusExecutorConfiguration } 
 import { type Publication } from './deployment-journal.js';
 import { z } from 'zod';
 import { page } from './ui.js';
-import type { AuthContext, Release } from './types.js';
+import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
-import { Release as BrowserRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget } from './browser-contracts.js';
+import { Release as BrowserRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -333,7 +333,12 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
 });
 
 app.get('/admin/channels', requireAuth(true), (c) => c.json(store.listChannels()));
-app.get('/admin/receipts', requireAuth(true), (c) => c.json(store.listReceipts()));
+// Optional exact target filter; without it the historical listing is returned unchanged.
+app.get('/admin/receipts', requireAuth(true), (c) => {
+  const query = ReceiptQuery.safeParse({ targetId: c.req.query('targetId') });
+  if (!query.success) throw new HTTPException(400, { message: 'Invalid receipt filter' });
+  return c.json(store.listReceipts(query.data.targetId));
+});
 
 app.put('/admin/channels/:channel/:slug', requireAuth(true), async (c) => {
   const channel = channelParam(c.req.param('channel'));
@@ -353,7 +358,12 @@ app.delete('/admin/channels/:channel/:slug', requireAuth(true), (c) => {
   return c.body(null, 204);
 });
 
-app.get('/admin/targets', requireAuth(true), (c) => c.json(store.listTargets()));
+// Optional exact magnusNodeId filter; without it the historical listing is returned unchanged.
+app.get('/admin/targets', requireAuth(true), (c) => {
+  const query = TargetQuery.safeParse({ nodeId: c.req.query('nodeId') });
+  if (!query.success) throw new HTTPException(400, { message: 'Invalid target filter' });
+  return c.json(store.listTargets(query.data.nodeId));
+});
 
 app.put('/admin/targets/:target', requireAuth(true), async (c) => {
   const body = browserInput(UpdateTarget, await requestJson(c));
@@ -365,8 +375,17 @@ app.put('/admin/targets/:target', requireAuth(true), async (c) => {
   if (!validHost || !validUser || (body.enabled !== undefined && typeof body.enabled !== 'boolean')) {
     throw new HTTPException(400, { message: 'Invalid target' });
   }
-  store.saveTarget({ name, host, username, enabled: body.enabled !== false });
-  store.audit(c.get('auth').username, 'target.update', name, { host, username, enabled: body.enabled !== false });
+  // Omitted fleet fields keep the stored binding so older clients cannot erase it.
+  let binding: TargetBinding | null | undefined;
+  if (body.magnusNodeId !== undefined || body.agentRefs !== undefined) {
+    const current = store.targetBinding(name);
+    const magnusNodeId = body.magnusNodeId === undefined ? current?.magnusNodeId ?? null : body.magnusNodeId;
+    const agentRefs = body.agentRefs === undefined ? current?.agentRefs ?? [] : [...new Set(body.agentRefs)];
+    if (agentRefs.some((ref) => ref.slice(0, ref.indexOf('~')) !== magnusNodeId)) throw new HTTPException(400, { message: 'Invalid target' });
+    binding = magnusNodeId === null ? null : { magnusNodeId, agentRefs };
+  }
+  store.saveTarget({ name, host, username, enabled: body.enabled !== false }, binding);
+  store.audit(c.get('auth').username, 'target.update', name, { host, username, enabled: body.enabled !== false, ...(binding === undefined ? {} : { magnusNodeId: binding?.magnusNodeId ?? null, agentRefs: binding?.agentRefs.length ?? 0 }) });
   return c.json({ ok: true });
 });
 
