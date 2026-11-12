@@ -97,9 +97,27 @@ export const Ok = z.object({ok:z.literal(true)});
 export const EmptyResponse = z.null();
 export const EnrollmentResponse = z.object({target:z.string(),token:z.string(),oneTime:z.literal(true)});
 export const SkillList = z.array(Skill), ReleaseList=z.array(Release), ChannelList=z.array(Channel), TargetList=z.array(Target), AuditList=z.array(Audit), ReceiptList=z.array(Receipt), DeploymentJobList=z.array(DeploymentJob);
+// HiveEvent v1 feed (GET /v1/hive/events), mirroring @hivemagnus/hive-common's validator.
+export const HiveEventQuery = z.object({
+  after: z.string().regex(/^[A-Za-z0-9_-]{1,512}$/).optional(),
+  limit: z.coerce.number().int().min(1).optional(),
+});
+export const HiveEvent = z.object({
+  id: z.string().max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  product: z.literal('hiveskills'),
+  type: z.enum(['deployment.succeeded', 'deployment.failed', 'deployment.expired', 'deployment.unknown', 'target.restart.failed', 'skill.release.published', 'skill.release.promoted', 'skill.release.withdrawn', 'skill.deleted']),
+  severity: z.enum(['info', 'warning', 'critical']),
+  title: z.string().min(1).max(200),
+  summary: z.string().max(2000),
+  occurredAt: z.iso.datetime(),
+  subject: z.object({ nodeId: z.string().regex(/^[a-z0-9_-]{2,32}$/).optional(), agentRef: z.string().regex(/^[a-z0-9_-]{2,32}~[a-z0-9_-]{2,32}$/).optional() }).strict().optional(),
+  link: z.object({ product: z.literal('hiveskills'), path: z.string().regex(/^\/(?![/\\])/) }).strict(),
+  sourceRef: z.string().min(1).max(256).optional(),
+}).strict();
+export const HiveEventPage = z.object({ data: z.array(HiveEvent), nextCursor: z.string().nullable() }).strict();
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
   ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse,
-  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery
+  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery
 };
 
 export const AgentRefSchema=AgentRef;
@@ -130,6 +148,12 @@ export const EnrollTargetSchema=EnrollTarget;
 export type EnrollTarget=z.input<typeof EnrollTarget>;
 export const EnrollmentResponseSchema=EnrollmentResponse;
 export type EnrollmentResponse=z.infer<typeof EnrollmentResponse>;
+export const HiveEventSchema=HiveEvent;
+export type HiveEvent=z.infer<typeof HiveEvent>;
+export const HiveEventPageSchema=HiveEventPage;
+export type HiveEventPage=z.infer<typeof HiveEventPage>;
+export const HiveEventQuerySchema=HiveEventQuery;
+export type HiveEventQuery=z.infer<typeof HiveEventQuery>;
 export const MagnusNodeIdSchema=MagnusNodeId;
 export type MagnusNodeId=z.infer<typeof MagnusNodeId>;
 export const ManagedDeploymentSchema=ManagedDeployment;

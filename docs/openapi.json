@@ -374,6 +374,239 @@
         ],
         "type": "object"
       },
+      "HiveEvent": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "type": "string"
+          },
+          "link": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "pattern": "^\\/(?![/\\\\])",
+                "type": "string"
+              },
+              "product": {
+                "const": "hiveskills",
+                "type": "string"
+              }
+            },
+            "required": [
+              "product",
+              "path"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "product": {
+            "const": "hiveskills",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "sourceRef": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "subject": {
+            "additionalProperties": false,
+            "properties": {
+              "agentRef": {
+                "pattern": "^[a-z0-9_-]{2,32}~[a-z0-9_-]{2,32}$",
+                "type": "string"
+              },
+              "nodeId": {
+                "pattern": "^[a-z0-9_-]{2,32}$",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "summary": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "deployment.succeeded",
+              "deployment.failed",
+              "deployment.expired",
+              "deployment.unknown",
+              "target.restart.failed",
+              "skill.release.published",
+              "skill.release.promoted",
+              "skill.release.withdrawn",
+              "skill.deleted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "product",
+          "type",
+          "severity",
+          "title",
+          "summary",
+          "occurredAt",
+          "link"
+        ],
+        "type": "object"
+      },
+      "HiveEventPage": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "type": "string"
+                },
+                "link": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "pattern": "^\\/(?![/\\\\])",
+                      "type": "string"
+                    },
+                    "product": {
+                      "const": "hiveskills",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "product",
+                    "path"
+                  ],
+                  "type": "object"
+                },
+                "occurredAt": {
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                  "type": "string"
+                },
+                "product": {
+                  "const": "hiveskills",
+                  "type": "string"
+                },
+                "severity": {
+                  "enum": [
+                    "info",
+                    "warning",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                "sourceRef": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "subject": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "agentRef": {
+                      "pattern": "^[a-z0-9_-]{2,32}~[a-z0-9_-]{2,32}$",
+                      "type": "string"
+                    },
+                    "nodeId": {
+                      "pattern": "^[a-z0-9_-]{2,32}$",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "summary": {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                "title": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "deployment.succeeded",
+                    "deployment.failed",
+                    "deployment.expired",
+                    "deployment.unknown",
+                    "target.restart.failed",
+                    "skill.release.published",
+                    "skill.release.promoted",
+                    "skill.release.withdrawn",
+                    "skill.deleted"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "product",
+                "type",
+                "severity",
+                "title",
+                "summary",
+                "occurredAt",
+                "link"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "HiveEventQuery": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "pattern": "^[A-Za-z0-9_-]{1,512}$",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "MagnusNodeId": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "pattern": "^[A-Za-z0-9._-]{1,128}$",
@@ -2052,6 +2285,62 @@
           }
         },
         "summary": "POST /v1/agent/receipts/{target}"
+      }
+    },
+    "/v1/hive/events": {
+      "get": {
+        "description": "Events from the last 14 days, oldest first by (occurredAt, id). Pass nextCursor as after to read on; a null nextCursor means caught up.",
+        "parameters": [
+          {
+            "description": "Cursor from a previous page",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, 1 to 200 (default 50; larger values are capped)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HiveEventPage"
+                }
+              }
+            },
+            "description": "A page of HiveEvents"
+          },
+          "400": {
+            "description": "Invalid cursor or limit"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Registry administrator access required"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "HiveEvent v1 feed of deployment outcomes, agent restart failures and skill release changes"
       }
     },
     "/v1/skills": {

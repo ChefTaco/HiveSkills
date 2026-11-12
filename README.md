@@ -209,6 +209,19 @@ Linked targets list these fields; unlinked targets are listed exactly as before.
 that node, and `GET /admin/receipts?targetId=<name>` returns only that target's
 receipts. Without the parameters both listings are unchanged.
 
+### Event feed
+
+`GET /v1/hive/events?after=<cursor>&limit=<n>` serves HiveEvent v1 events for the
+HiveXUI inbox, oldest first, from the last 14 days. It needs the same registry
+administrator access as `GET /admin/receipts` (Oathweave tokens need `hiveskills:read`).
+Events are derived from stored records: deployment jobs that completed (`info`),
+failed (`critical`), expired before dispatch (`info`) or need reconciling (`warning`);
+a target's latest receipt reporting a failed agent restart (`warning`); and audited
+release publication and promotion (`info`), channel withdrawal and skill deletion
+(`warning`). Events about a fleet-linked target carry its Magnus node and, when the
+target names exactly one, its agent. `limit` is 1 to 200 (default 50); a malformed
+cursor or limit returns 400. Pass `nextCursor` as `after`; `null` means caught up.
+
 ## Releases
 
 Pushing a `v*` tag runs `.github/workflows/release-image.yml`, which runs CI, builds the image

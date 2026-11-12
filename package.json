@@ -30,7 +30,7 @@
     "check:browser": "npm run build && node scripts/export-browser-contracts.mjs --check"
   },
   "dependencies": {
-    "@hivemagnus/hive-common": "^0.1.0",
+    "@hivemagnus/hive-common": "^0.4.0",
     "@hono/node-server": "2.1.5",
     "@photostructure/sqlite": "3.3.1",
     "hono": "^4.13.18",
