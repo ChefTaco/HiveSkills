@@ -8,6 +8,13 @@ online session revocation are mandatory. Tokens have one exact product audience
 and a maximum fifteen-minute lifetime. Permissions are not inferred from roles.
 Native machine credentials and standalone authentication remain available.
 
+Service (client-credentials) tokens are accepted only by `GET /v1/audit/export` and
+need the `hiveskills:audit:read` permission; they need no account link. Oathweave signs
+client-credentials tokens with its native issuer unless the client's policy selects the
+browser issuer: list those native issuer identifiers (for example its `JWT_ISSUER`) in
+the optional comma-separated `OATHWEAVE_NATIVE_ISSUERS`. A native issuer is accepted
+for service tokens only, never for user tokens.
+
 `HIVESKILLS_OATHWEAVE_IDENTITIES_JSON` is a protected JSON array of explicit account links:
 
 ```json

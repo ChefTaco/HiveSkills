@@ -12,6 +12,15 @@ export interface OathweaveOptions {
   jwksUrl: string;
   userinfoUrl: string;
   audience: string;
+  /** Oathweave native issuer identifiers (e.g. its JWT issuer name) accepted for service tokens only. */
+  nativeIssuers?: readonly string[];
+}
+/** A verified Oathweave client-credentials (service) principal. */
+export interface OathweaveService {
+  subject: string;
+  issuer: string;
+  clientId: string;
+  permissions: string[];
 }
 export interface OathweaveIdentity {
   subject: string;
@@ -40,12 +49,13 @@ export function createIdentityVerifier(
     audience: options.audience,
     jwksUrl: options.jwksUrl,
     userinfoUrl: options.userinfoUrl,
+    ...(options.nativeIssuers?.length ? { nativeIssuers: options.nativeIssuers } : {}),
     accept: 'user',
     clockToleranceSec: 0,
     sessionCacheTtlMs: 0,
     ...overrides,
   });
-  return async (token: string): Promise<OathweaveIdentity> => {
+  const verifyUser = async (token: string): Promise<OathweaveIdentity> => {
     const principal = await verifier.verifyUser(token);
     // The shared verifier treats an absent `roles` claim as no roles and also accepts
     // RFC 9068 `client_id`; this registry has always required both claims as issued.
@@ -61,7 +71,20 @@ export function createIdentityVerifier(
       ...(principal.authTime === undefined ? {} : { authTime: principal.authTime }),
     };
   };
+  /**
+   * Client-credentials tokens only. A validly signed user token fails with the
+   * `wrong_principal_kind` reason, so callers can fall back to the user path.
+   */
+  const verifyService = async (token: string): Promise<OathweaveService> => {
+    const principal = await verifier.verifyService(token);
+    return { subject: principal.subject, issuer: principal.issuer, clientId: principal.clientId, permissions: [...principal.permissions] };
+  };
+  return Object.assign(verifyUser, { verifyService });
 }
+
+/** Comma-separated `OATHWEAVE_NATIVE_ISSUERS`; empty when unset. */
+export const nativeIssuersFromEnv = (value: string | undefined): string[] =>
+  (value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
 
 let verifier: ReturnType<typeof createIdentityVerifier> | undefined;
 export function configuredOathweaveVerifier() {
@@ -83,6 +106,7 @@ export function configuredOathweaveVerifier() {
       jwksUrl: process.env.OATHWEAVE_JWKS_URL,
       userinfoUrl: process.env.OATHWEAVE_USERINFO_URL,
       audience: OATHWEAVE_AUDIENCE,
+      nativeIssuers: nativeIssuersFromEnv(process.env.OATHWEAVE_NATIVE_ISSUERS),
     });
   }
   return verifier;
