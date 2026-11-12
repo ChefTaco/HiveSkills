@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { compatibleVersion } from './compatibility.js';
 import type { HiveEventRecords } from './hive-events.js';
 import { EVENT_AUDIT_ACTIONS, EVENT_DEPLOYMENT_STATUSES } from './hive-events.js';
+import { TARGET_ACTIONS, type AuditExportRow } from './audit-export.js';
 import type { DeploymentTarget, ListedTarget, Release, Session, Skill, TargetBinding } from './types.js';
 if (!existsSync(config.databasePath)) throw new Error('Skills database is missing; run hive-skills migrate before opening storage');
 const db = new DatabaseSync(config.databasePath, { enableForeignKeyConstraints: true });
@@ -133,6 +134,13 @@ export const store = {
       audit: audit.map((row) => ({ id: row.id, action: row.action, subject: row.subject, details: row.details, createdAt: row.created_at })),
       receipts: receipts.map((row) => ({ target: row.target, receiptJson: row.receipt_json, updatedAt: row.updated_at, ...link(row) })),
     };
+  },
+  /** Audit rows after `afterId`, oldest first, each with the current fleet link of a target it names. */
+  auditExportRows: (afterId: number, count: number): AuditExportRow[] => {
+    const marks = TARGET_ACTIONS.map(() => '?').join(',');
+    const rows = db.prepare(`SELECT a.id,a.actor,a.action,a.subject,a.details,a.created_at,b.magnus_node_id,b.agent_refs_json FROM audit_log a LEFT JOIN target_agent_links b ON b.target=a.subject AND a.action IN (${marks}) WHERE a.id>? ORDER BY a.id LIMIT ?`)
+      .all(...TARGET_ACTIONS, afterId, count) as Array<{ id: number; actor: string; action: string; subject: string; details: string; created_at: string; magnus_node_id: string | null; agent_refs_json: string | null }>;
+    return rows.map((row) => ({ id: row.id, actor: row.actor, action: row.action, subject: row.subject, details: row.details, createdAt: row.created_at, magnusNodeId: row.magnus_node_id, agentRefs: row.agent_refs_json ? JSON.parse(row.agent_refs_json) as string[] : [] }));
   },
   audit: (actor: string, action: string, subject: string, details: Record<string, unknown>): void => { db.prepare('INSERT INTO audit_log (actor, action, subject, details, created_at) VALUES (?, ?, ?, ?, ?)').run(actor, action, subject, JSON.stringify(details), now()); }
 };

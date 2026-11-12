@@ -1,5 +1,7 @@
 import { parseAccountLinks, linkedLocalId } from './account-links.js';
 import { configuredOathweaveVerifier } from './identity.js';
+import { OathweaveError } from '@hivemagnus/hive-common/oathweave';
+import { AUDIT_EXPORT_DEFAULT_LIMIT, AUDIT_EXPORT_MAX_LIMIT, AUDIT_READ_PERMISSION, auditExportPage, decodeAuditCursor } from './audit-export.js';
 import { createHealth } from '@hivemagnus/hive-common/health';
 import { requestContext } from '@hivemagnus/hive-common/hono';
 import { parseFeedQuery } from '@hivemagnus/hive-common/events';
@@ -86,6 +88,23 @@ const requireAuth = (admin = false): MiddlewareHandler<{ Variables: Variables }>
   if (admin && !auth.isAdmin) throw new HTTPException(403, { message: 'Administrator access is required' });
   c.set('auth', auth);
   await next();
+};
+
+// Audit export readers: Oathweave service tokens with hiveskills:audit:read, or registry administrators.
+const requireAuditReader: MiddlewareHandler<{ Variables: Variables }> = async (c, next): Promise<void | Response> => {
+  const authorization = c.req.header('authorization');
+  if (authorization && verifyIdentity && authorization.startsWith('Bearer ')) {
+    let service;
+    try { service = await verifyIdentity.verifyService(authorization.slice(7)); } catch (error) {
+      // A validly signed user token takes the administrator path below, which verifies it again.
+      if (error instanceof OathweaveError && error.reason === 'wrong_principal_kind') return requireAuth(true)(c, next);
+      throw new HTTPException(401, { message: 'Invalid identity token' });
+    }
+    if (!service.permissions.includes(AUDIT_READ_PERMISSION)) throw new HTTPException(403, { message: 'Permission required' });
+    c.set('auth', { username: `service:${service.subject}`, isAdmin: false });
+    await next(); return;
+  }
+  return requireAuth(true)(c, next);
 };
 
 const requestJson = async (c: { req: { json: () => Promise<unknown> } }): Promise<JsonObject> => asObject(await c.req.json());
@@ -358,6 +377,26 @@ app.get('/v1/hive/events', requireAuth(true), (c) => {
   const now = Date.now();
   const page = hiveEventPage(store.hiveEventRecords(feedSince(position, now)), position, limit, now,
     (count) => console.warn(`hive events: dropped ${count} invalid event(s)`));
+  c.header('Cache-Control', 'no-store');
+  return c.json(page);
+});
+
+// Suite audit export (HiveAuditRecord v1) for Cindertrace: every stored audit row, oldest first by id.
+app.get('/v1/audit/export', requireAuditReader, (c) => {
+  let limit: number, afterId = 0;
+  try {
+    const query = parseFeedQuery(new URL(c.req.url).searchParams, { defaultLimit: AUDIT_EXPORT_DEFAULT_LIMIT, maxLimit: AUDIT_EXPORT_MAX_LIMIT });
+    limit = query.limit;
+    if (query.after !== undefined) {
+      const decoded = decodeAuditCursor(query.after);
+      if (decoded === null) throw new Error('cursor');
+      afterId = decoded;
+    }
+  } catch {
+    throw new HTTPException(400, { message: 'Invalid audit export query' });
+  }
+  const page = auditExportPage(store.auditExportRows(afterId, limit + 1), limit,
+    (count) => console.warn(`audit export: skipped ${count} unmappable record(s)`));
   c.header('Cache-Control', 'no-store');
   return c.json(page);
 });

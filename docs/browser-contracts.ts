@@ -115,9 +115,27 @@ export const HiveEvent = z.object({
   sourceRef: z.string().min(1).max(256).optional(),
 }).strict();
 export const HiveEventPage = z.object({ data: z.array(HiveEvent), nextCursor: z.string().nullable() }).strict();
+// HiveAuditRecord v1 (GET /v1/audit/export), the suite audit export record shared unchanged across products.
+const auditScalar = z.union([z.string(), z.number(), z.boolean()]);
+export const HiveAuditRecord = z.object({
+  id: z.string().min(1).max(256).regex(/^(hivemem|hiveskills|ardentstudio|embermend):audit:[^\s]+$/),
+  product: z.enum(['hivemem', 'hiveskills', 'ardentstudio', 'embermend']),
+  occurredAt: z.iso.datetime(),
+  action: z.string().max(128).regex(/^[a-z0-9_]+(?:\.[a-z0-9_]+)+$/),
+  outcome: z.enum(['success', 'failure']),
+  actor: z.object({ type: z.enum(['user', 'service', 'agent', 'system']), id: z.string().min(1).max(256), issuer: z.string().max(512).optional(), displayName: z.string().max(256).optional() }).strict(),
+  target: z.object({ type: z.string().min(1).max(64).optional(), id: z.string().min(1).max(512).optional() }).strict().optional(),
+  subject: z.object({ actorId: z.string().min(1).max(256).optional(), agentRef: z.string().min(1).max(257).optional(), nodeId: z.string().min(1).max(128).optional() }).strict().optional(),
+  details: z.record(z.string(), auditScalar).refine((value) => new TextEncoder().encode(JSON.stringify(value)).length <= 4096, 'details exceed 4 KB'),
+}).strict();
+export const HiveAuditPage = z.object({ data: z.array(HiveAuditRecord), nextCursor: z.string().nullable() }).strict();
+export const HiveAuditQuery = z.object({
+  after: z.string().regex(/^[A-Za-z0-9._~:-]{1,512}$/).optional(),
+  limit: z.coerce.number().int().min(1).optional(),
+});
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
   ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse,
-  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery
+  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery,HiveAuditRecord,HiveAuditPage,HiveAuditQuery
 };
 
 export const AgentRefSchema=AgentRef;
@@ -148,6 +166,12 @@ export const EnrollTargetSchema=EnrollTarget;
 export type EnrollTarget=z.input<typeof EnrollTarget>;
 export const EnrollmentResponseSchema=EnrollmentResponse;
 export type EnrollmentResponse=z.infer<typeof EnrollmentResponse>;
+export const HiveAuditPageSchema=HiveAuditPage;
+export type HiveAuditPage=z.infer<typeof HiveAuditPage>;
+export const HiveAuditQuerySchema=HiveAuditQuery;
+export type HiveAuditQuery=z.infer<typeof HiveAuditQuery>;
+export const HiveAuditRecordSchema=HiveAuditRecord;
+export type HiveAuditRecord=z.infer<typeof HiveAuditRecord>;
 export const HiveEventSchema=HiveEvent;
 export type HiveEvent=z.infer<typeof HiveEvent>;
 export const HiveEventPageSchema=HiveEventPage;

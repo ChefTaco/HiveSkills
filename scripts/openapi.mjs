@@ -127,6 +127,23 @@ paths['/v1/hive/events'].get = {
     403: { description: 'Registry administrator access required' },
   },
 };
+// Suite audit export (HiveAuditRecord v1) for Cindertrace: every stored audit row, oldest first by id.
+paths['/v1/audit/export'].get = {
+  summary: 'HiveAuditRecord v1 export of the registry audit log',
+  description:
+    'Every stored audit record, oldest first by id, with no retention window. Pass nextCursor as after to read on; a null nextCursor means caught up. Oathweave service (client-credentials) tokens need hiveskills:audit:read; registry administrators are also accepted.',
+  security: [{ resourceBearer: [] }, { nativeSession: [] }],
+  parameters: [
+    { name: 'after', in: 'query', required: false, description: 'Opaque cursor from a previous page', schema: { type: 'string' } },
+    { name: 'limit', in: 'query', required: false, description: 'Page size, 1 to 200 (default 100; larger values are capped)', schema: { type: 'integer', minimum: 1 } },
+  ],
+  responses: {
+    200: { description: 'A page of HiveAuditRecords', content: { 'application/json': { schema: { $ref: '#/components/schemas/HiveAuditPage' } } } },
+    400: { description: 'Invalid cursor or limit' },
+    401: { description: 'Authentication required' },
+    403: { description: 'hiveskills:audit:read or registry administrator access required' },
+  },
+};
 // The standalone web UI is retired: / only points browsers to HiveXUI.
 paths['/'].get = {
   summary: 'Retired web UI: HiveXUI stub page or redirect',

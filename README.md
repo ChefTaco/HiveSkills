@@ -222,6 +222,27 @@ release publication and promotion (`info`), channel withdrawal and skill deletio
 target names exactly one, its agent. `limit` is 1 to 200 (default 50); a malformed
 cursor or limit returns 400. Pass `nextCursor` as `after`; `null` means caught up.
 
+### Audit export
+
+`GET /v1/audit/export?after=<cursor>&limit=<n>` serves every stored registry audit
+record as a HiveAuditRecord v1 (`{"data":[...],"nextCursor":...}`), oldest first by
+id, for the Cindertrace audit collector. There is no retention window. It accepts an
+Oathweave service (client-credentials) token for the `hiveskills` audience whose
+permissions include **`hiveskills:audit:read`**, or a registry administrator (session
+or linked Oathweave user, as for `GET /admin/audit`). Other callers get 403; a
+request without credentials gets 401. Set `OATHWEAVE_NATIVE_ISSUERS` when the service
+client's tokens are signed with Oathweave's native issuer.
+
+Actions are `session.login`, `session.logout`, `skill.create`, `skill.update`,
+`skill.delete`, `release.create`, `release.promote`, `release.withdraw`,
+`release.seed`, `target.update`, `target.enroll`, `deployment.prepare`,
+`deployment.queue`, `deployment.approve` and `deployment.reconcile`. Records about a
+deployment target carry its fleet link in `subject` (`nodeId`, and `agentRef` when
+the target names exactly one agent). `details` holds redacted flat scalars only (at
+most 4 KB); session ids and archive contents are never exported. `limit` is 1 to 200
+(default 100); a malformed cursor or limit returns 400. Pass `nextCursor` as `after`;
+`null` means caught up. `GET /admin/audit` is unchanged.
+
 ## Releases
 
 Pushing a `v*` tag runs `.github/workflows/release-image.yml`, which runs CI, builds the image
