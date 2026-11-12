@@ -2,6 +2,8 @@ import { parseAccountLinks, linkedLocalId } from './account-links.js';
 import { configuredOathweaveVerifier } from './identity.js';
 import { createHealth } from '@hivemagnus/hive-common/health';
 import { requestContext } from '@hivemagnus/hive-common/hono';
+import { parseFeedQuery } from '@hivemagnus/hive-common/events';
+import { decodePosition, feedSince, hiveEventPage, type FeedPosition } from './hive-events.js';
 import { maintenanceActive } from './release/runtime.js';
 import { metadata } from './release/runtime.js';
 import { packageRoot as releasePackageRoot } from './paths.js';
@@ -339,6 +341,25 @@ app.get('/admin/receipts', requireAuth(true), (c) => {
   const query = ReceiptQuery.safeParse({ targetId: c.req.query('targetId') });
   if (!query.success) throw new HTTPException(400, { message: 'Invalid receipt filter' });
   return c.json(store.listReceipts(query.data.targetId));
+});
+
+// HiveEvent v1 feed for the HiveXUI inbox, derived from deployment jobs, agent receipts and the
+// registry audit log. Same access as the receipt and deployment reads: registry administrators only.
+app.get('/v1/hive/events', requireAuth(true), (c) => {
+  let limit: number, position: FeedPosition | null | undefined;
+  try {
+    const query = parseFeedQuery(new URL(c.req.url).searchParams);
+    limit = query.limit;
+    position = query.after === undefined ? undefined : decodePosition(query.after);
+  } catch {
+    throw new HTTPException(400, { message: 'Invalid event feed query' });
+  }
+  if (position === null) throw new HTTPException(400, { message: 'Invalid event feed cursor' });
+  const now = Date.now();
+  const page = hiveEventPage(store.hiveEventRecords(feedSince(position, now)), position, limit, now,
+    (count) => console.warn(`hive events: dropped ${count} invalid event(s)`));
+  c.header('Cache-Control', 'no-store');
+  return c.json(page);
 });
 
 app.put('/admin/channels/:channel/:slug', requireAuth(true), async (c) => {

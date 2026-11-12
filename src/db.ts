@@ -4,6 +4,8 @@ import { DatabaseSync } from './sqlite.js';
 import { DeploymentJournal } from './deployment-journal.js';
 import { config } from './config.js';
 import { compatibleVersion } from './compatibility.js';
+import type { HiveEventRecords } from './hive-events.js';
+import { EVENT_AUDIT_ACTIONS, EVENT_DEPLOYMENT_STATUSES } from './hive-events.js';
 import type { DeploymentTarget, ListedTarget, Release, Session, Skill, TargetBinding } from './types.js';
 if (!existsSync(config.databasePath)) throw new Error('Skills database is missing; run hive-skills migrate before opening storage');
 const db = new DatabaseSync(config.databasePath, { enableForeignKeyConstraints: true });
@@ -115,5 +117,22 @@ export const store = {
   },
   seedTarget: (target: DeploymentTarget): void => { db.prepare('INSERT OR IGNORE INTO deployment_targets VALUES (?, ?, ?, ?)').run(target.name, target.host, target.username, Number(target.enabled)); },
   getTarget: (name: string): DeploymentTarget | undefined => { const row = db.prepare('SELECT * FROM deployment_targets WHERE name=? AND enabled=1').get(name) as TargetRow | undefined; return row && { name: row.name, host: row.host, username: row.username, enabled: row.enabled === 1 }; },
+  /** Records HiveEvents derive from, at or after `since`. Receipts are few, so all latest receipts are read. */
+  hiveEventRecords: (since: string): HiveEventRecords => {
+    type Linked = { magnus_node_id: string | null; agent_refs_json: string | null };
+    const link = (row: Linked) => ({ magnusNodeId: row.magnus_node_id, agentRefs: row.agent_refs_json ? JSON.parse(row.agent_refs_json) as string[] : [] });
+    const marks = (values: readonly string[]) => values.map(() => '?').join(',');
+    const deployments = db.prepare(`SELECT j.id,j.target,j.status,j.result,j.updated_at,b.magnus_node_id,b.agent_refs_json FROM deployment_jobs j LEFT JOIN target_agent_links b ON b.target=j.target WHERE j.status IN (${marks(EVENT_DEPLOYMENT_STATUSES)}) AND j.updated_at>=?`)
+      .all(...EVENT_DEPLOYMENT_STATUSES, since) as Array<Linked & { id: string; target: string; status: string; result: string | null; updated_at: string }>;
+    const audit = db.prepare(`SELECT id,action,subject,details,created_at FROM audit_log WHERE action IN (${marks(EVENT_AUDIT_ACTIONS)}) AND created_at>=?`)
+      .all(...EVENT_AUDIT_ACTIONS, since) as Array<{ id: number; action: string; subject: string; details: string; created_at: string }>;
+    const receipts = db.prepare('SELECT p.target,p.receipt_json,p.updated_at,b.magnus_node_id,b.agent_refs_json FROM target_policies p LEFT JOIN target_agent_links b ON b.target=p.target WHERE p.receipt_json IS NOT NULL')
+      .all() as Array<Linked & { target: string; receipt_json: string | null; updated_at: string }>;
+    return {
+      deployments: deployments.map((row) => ({ id: row.id, target: row.target, status: row.status, result: row.result, updatedAt: row.updated_at, ...link(row) })),
+      audit: audit.map((row) => ({ id: row.id, action: row.action, subject: row.subject, details: row.details, createdAt: row.created_at })),
+      receipts: receipts.map((row) => ({ target: row.target, receiptJson: row.receipt_json, updatedAt: row.updated_at, ...link(row) })),
+    };
+  },
   audit: (actor: string, action: string, subject: string, details: Record<string, unknown>): void => { db.prepare('INSERT INTO audit_log (actor, action, subject, details, created_at) VALUES (?, ?, ?, ?, ?)').run(actor, action, subject, JSON.stringify(details), now()); }
 };

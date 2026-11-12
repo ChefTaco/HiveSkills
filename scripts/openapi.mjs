@@ -110,6 +110,23 @@ for (const [path, name, description] of [
   paths[path].get.parameters = [{ name, in: 'query', required: false, description, schema: { type: 'string' } }];
   paths[path].get.responses[400] = { description: 'Invalid filter' };
 }
+// HiveEvent v1 feed for the HiveXUI inbox: registry administrators only, oldest first.
+paths['/v1/hive/events'].get = {
+  summary: 'HiveEvent v1 feed of deployment outcomes, agent restart failures and skill release changes',
+  description:
+    'Events from the last 14 days, oldest first by (occurredAt, id). Pass nextCursor as after to read on; a null nextCursor means caught up.',
+  security: [{ resourceBearer: [] }, { nativeSession: [] }],
+  parameters: [
+    { name: 'after', in: 'query', required: false, description: 'Cursor from a previous page', schema: { type: 'string' } },
+    { name: 'limit', in: 'query', required: false, description: 'Page size, 1 to 200 (default 50; larger values are capped)', schema: { type: 'integer', minimum: 1 } },
+  ],
+  responses: {
+    200: { description: 'A page of HiveEvents', content: { 'application/json': { schema: { $ref: '#/components/schemas/HiveEventPage' } } } },
+    400: { description: 'Invalid cursor or limit' },
+    401: { description: 'Authentication required' },
+    403: { description: 'Registry administrator access required' },
+  },
+};
 // The standalone web UI is retired: / only points browsers to HiveXUI.
 paths['/'].get = {
   summary: 'Retired web UI: HiveXUI stub page or redirect',

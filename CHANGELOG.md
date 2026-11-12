@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `GET /v1/hive/events`, a HiveEvent v1 feed for the HiveXUI inbox (cursor paging with `after` and `limit`, 14-day window, oldest first). It is derived from existing records with no migration: deployment outcomes (`deployment.succeeded`, `deployment.failed`, `deployment.expired`, `deployment.unknown`), failed agent restarts from target receipts (`target.restart.failed`) and audited release changes (`skill.release.published`, `skill.release.promoted`, `skill.release.withdrawn`, `skill.deleted`). Events link to the HiveXUI skills screen and carry the target's linked Magnus node and agent. Access matches `GET /admin/receipts`. Every event is validated with `@hivemagnus/hive-common` before it is served. OpenAPI and browser contracts add `HiveEvent`, `HiveEventPage` and `HiveEventQuery`.
+
+### Changed
+
+- Require `@hivemagnus/hive-common` 0.4.0 for the shared event feed helpers.
+
 ### Removed
 
 - Retire the standalone web UI (`src/ui.ts`). HiveXUI is now the only UI for the Hive:Magnus product line, including HiveSkills. All API routes are unchanged.
