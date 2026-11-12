@@ -27,9 +27,9 @@ through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md
 `@hivemagnus/hive-skills` (the name this source still uses), the `@hivemagnus/hive` launcher's
 `--services skills` option and the image `ghcr.io/cheftaco/hive-skills` are the legacy 1.x line
 from the Hive repository: `npm install` and `npx` resolve `@hivemagnus/hive-skills` to 1.2.2, not
-to this release. The [Hive README](https://github.com/ChefTaco/hive#legacy-npm-packages-1x)
+to this release. The [Hive README](https://github.com/ChefTaco/hive#the-retired-npm-packages)
 describes that line, and its
-[npm migration runbook](https://github.com/ChefTaco/hive/blob/main/docs/npm-deployments.md#optional-skills-registry)
+[npm migration runbook](https://github.com/ChefTaco/hive/blob/v1.2.2/docs/npm-deployments.md#optional-skills-registry)
 covers existing systemd installations of it.
 
 **On its own.** The registry always serves HTTPS, so mount a certificate and key that cover
@@ -201,7 +201,7 @@ Use `hive upgrade --dry-run`, then `hive upgrade` for the enrolled release bundl
 is read-only; migration requires a verified backup. Set `HIVE_AUTO_MIGRATE=true` explicitly for
 startup migrations outside a managed install. Slow or one-way automatic migrations are refused.
 `check --json` reports configuration without initializing state. No upgrade rotates signing keys
-or reseeds existing accounts. See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/main/UPGRADING.md)
+or reseeds existing accounts. See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/v1.2.2/UPGRADING.md)
 for adoption, compatibility, recovery, update notices and container controls.
 
 Container probes use a loopback `HIVE_HEALTH_URL`. Override its port/protocol for
