@@ -22,6 +22,7 @@ export function envSchemaDocument(): unknown {
       { name: 'HIVE_SKILLS_TLS_CERT_FILE', required: true, description: 'TLS certificate PEM file.' },
       { name: 'HIVE_SKILLS_DEPLOY_SCRIPT', description: 'Optional override for the bundled agent deployment helper.' },
       { name: 'HIVE_SKILLS_MAGNUS_EXECUTOR_JSON', description: 'Optional verified HTTPS executor URL with protected credentialFile and optional caFile. Enables approved Magnus jobs and disables legacy SSH execution.' },
+      { name: 'HIVEXUI_URL', description: 'Optional absolute http(s) HiveXUI URL. When set, the retired web UI path / redirects there; otherwise it serves a page pointing to HiveXUI.' },
       { name: 'HIVE_SKILLS_TARGETS', description: 'Optional initial deployment targets: name=user@host, comma-separated.' },
     ].map((entry) => ({ required: false, secret: false, ...entry })),
   };

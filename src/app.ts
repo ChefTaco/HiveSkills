@@ -18,7 +18,7 @@ import { store, deploymentJournal } from './db.js';
 import { requireMagnusExecutor, executeMagnusJob, magnusExecutorConfiguration } from './magnus-deployment.js';
 import { type Publication } from './deployment-journal.js';
 import { z } from 'zod';
-import { page } from './ui.js';
+import { hiveXuiStubResponse } from './hivexui-stub.js';
 import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
 import { Release as BrowserRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
@@ -113,7 +113,8 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-app.get('/', (c) => c.html(page));
+// The standalone web UI is retired; HiveXUI is the UI.
+app.get('/', (c) => hiveXuiStubResponse(c, config.hivexuiUrl));
 app.get('/health/live', (c) => c.json({ ...metadata(releasePackageRoot), status: 'ok', service: 'hive-skills' }));
 const health = createHealth({
   service: 'hive-skills',

@@ -6,7 +6,11 @@ It is one product in the [Hive:Magnus](https://github.com/ChefTaco/hive) suite, 
 
 This project was extracted from Hive with its migration history and client protocols intact. `provenance.json` records the source revision and original file hashes.
 
-It exposes a digest-verified HTTPS archive API, an OS-authenticated operator page, and a pull-side Hermes bridge. Hermes itself remains unmodified: each host gets a user systemd timer that syncs skill archives into `~/.hermes/skills/registry` and restarts the gateway only when content changes.
+It exposes a digest-verified HTTPS archive API, OS-authenticated administration APIs, and a pull-side Hermes bridge. Hermes itself remains unmodified: each host gets a user systemd timer that syncs skill archives into `~/.hermes/skills/registry` and restarts the gateway only when content changes.
+
+HiveSkills no longer ships its own web UI. HiveXUI is the UI for the Hive:Magnus product line,
+including HiveSkills. The old UI address (`/`) serves a small static page pointing to HiveXUI or,
+when `HIVEXUI_URL` is set, redirects there (`302`).
 
 The registry is intentionally small and local-first. SQLite records skills, releases, sessions, audit events, and deployment targets; archives live under the configured data directory. The initial catalog entry is **HiveMem**, based on the existing HiveMem Hermes plugin/skill source supplied at seed time.
 
@@ -99,7 +103,14 @@ HIVE_SKILLS_ADMIN_USERS=admin
 HIVE_SKILLS_PAM_SERVICE=login
 HIVE_SKILLS_TLS_KEY_FILE=/opt/hive-skills/tls/server.key
 HIVE_SKILLS_TLS_CERT_FILE=/opt/hive-skills/tls/server.crt
+# Optional: redirect the retired web UI address to HiveXUI.
+HIVEXUI_URL=https://hivexui.example.com/
 ```
+
+`HIVEXUI_URL` is optional. When set, it must be an absolute `http` or `https` URL without
+credentials or a fragment, or startup fails. Requests for the retired web UI path (`/`) are then
+redirected (`302`) to exactly that URL; the request path is not appended. When unset, `/` serves a
+static page that tells operators to open HiveXUI. All API routes are unaffected either way.
 
 Generate the session secret with `openssl rand -hex 32`. Configure a bind address suitable
 for the network where the registry is exposed and a certificate covering its public URL.
@@ -150,7 +161,7 @@ HIVE_SKILLS_TARGET_USER=deploy \
   scripts/deploy-hermes-agent.sh --target agent-1
 ```
 
-That installs a `hive-skills-sync` systemd **user** service and timer for the target account. The timer pulls `/v1/agent/manifest` and downloads only changed archives with SHA-256 verification. It never edits Hermes core code. A registry admin can invoke the same deployment from the web page; the server queues a durable deployment job and records its completion status. No target OS password is stored in the network service environment.
+That installs a `hive-skills-sync` systemd **user** service and timer for the target account. The timer pulls `/v1/agent/manifest` and downloads only changed archives with SHA-256 verification. It never edits Hermes core code. A registry admin can invoke the same deployment through the administration API (for example from HiveXUI); the server queues a durable deployment job and records its completion status. No target OS password is stored in the network service environment.
 
 Releases may declare `minHermesVersion` and `maxHermesVersion` when published.
 The bridge detects the local `hermes --version`, supplies it to the manifest, and
@@ -163,6 +174,7 @@ registry installations do not synchronize Skills state.
 
 ## API overview
 
+- `GET /` – retired web UI: a static page pointing to HiveXUI, or a `302` to `HIVEXUI_URL` when set
 - `GET /healthz` – unauthenticated readiness (`GET /health/ready` returns the suite-standard body; `GET /health/live` is liveness)
 - `GET /v1/skills` / `GET /v1/skills/:slug` – public catalog
 - `GET /v1/agent/manifest` – Hermes pull manifest
