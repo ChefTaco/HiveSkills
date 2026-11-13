@@ -160,3 +160,52 @@ test('requests carry an x-request-id without changing error bodies', async () =>
   const generated = await app.request('https://registry.test/health/live');
   assert.match(generated.headers.get('x-request-id') ?? '', /^[0-9a-f-]{36}$/);
 });
+
+test('a body that is not JSON is a client error', async () => {
+  const { createSession } = await import('./auth.js');
+  const cookie = 'hive_skills_session=' + createSession('admin');
+  const post = (path: string, method = 'POST') => app.request(`https://registry.test${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: '{"slug":' });
+  for (const response of [await post('/auth/login'), await post('/admin/skills'), await post('/admin/targets/agent-1', 'PUT')]) {
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: 'Invalid JSON body' });
+  }
+});
+
+test('logout revokes and audits only a session this registry issued', async () => {
+  const { createSession, readAuth } = await import('./auth.js');
+  const logout = (cookie: string) => app.request('https://registry.test/auth/logout', { method: 'POST', headers: { cookie } });
+  const rows = () => store.listAudit(100, Number.MAX_SAFE_INTEGER) as Array<{ actor: string; action: string; subject: string }>;
+  const before = rows().length;
+  const token = createSession('admin');
+  const [id] = token.split('.');
+  // Unsigned or forged cookies neither write audit rows nor revoke the session they name.
+  for (const cookie of ['hive_skills_session=injected-subject', `hive_skills_session=${id}`, `hive_skills_session=${id}.forged`]) {
+    const response = await logout(cookie);
+    assert.equal(response.status, 204);
+    assert.match(response.headers.get('set-cookie') ?? '', /Max-Age=0/);
+  }
+  assert.equal(rows().length, before);
+  assert.equal(readAuth(`hive_skills_session=${token}`)?.username, 'admin');
+  assert.equal((await logout(`hive_skills_session=${token}`)).status, 204);
+  assert.equal(readAuth(`hive_skills_session=${token}`), undefined);
+  const [latest] = rows();
+  assert.deepEqual({ actor: latest?.actor, action: latest?.action, subject: latest?.subject }, { actor: 'admin', action: 'logout', subject: 'session' });
+  // Replaying the revoked cookie is not audited again.
+  await logout(`hive_skills_session=${token}`);
+  assert.equal(rows().length, before + 1);
+});
+
+test('names no OS account can have do not exhaust the sign-in throttle', async () => {
+  const login = (username: string) => app.request('https://registry.test/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: 'incorrect' }) });
+  for (let index = 0; index < 1001; index++) assert.equal((await login(`no account ${index}`)).status, 401);
+  // A well-formed name is still evaluated instead of being refused as throttled.
+  assert.equal((await login('fixture-absent-account')).status, 401);
+});
+
+test('the public URL never ends with a slash, so archive links match what agents expect', async () => {
+  const { publicUrlFrom } = await import('./config.js');
+  assert.equal(publicUrlFrom('https://registry.test:4030/', 4030), 'https://registry.test:4030');
+  assert.equal(publicUrlFrom('https://registry.test/skills//', 4030), 'https://registry.test/skills');
+  assert.equal(publicUrlFrom('https://registry.test', 4030), 'https://registry.test');
+  assert.equal(publicUrlFrom(undefined, 4031), 'https://localhost:4031');
+});

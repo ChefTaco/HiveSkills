@@ -43,13 +43,17 @@ export function parseTargets(value: string | undefined): DeploymentTarget[] {
   });
 }
 
+export const publicUrlFrom = (value: string | undefined, listenPort: number): string =>
+  (value?.trim() || `https://localhost:${listenPort}`).replace(/\/+$/, '');
+
 const adminUsers = new Set((process.env.HIVE_SKILLS_ADMIN_USERS ?? '').split(',').map((value) => value.trim()).filter(Boolean));
 if (adminUsers.size === 0) console.warn('HIVE_SKILLS_ADMIN_USERS is empty; no account can administer the registry.');
 
 export const config = {
   host,
   port,
-  publicUrl: process.env.HIVE_SKILLS_PUBLIC_URL ?? `https://localhost:${port}`,
+  // No trailing slash: archive links are built as `${publicUrl}/v1/...` and agents compare them exactly.
+  publicUrl: publicUrlFrom(process.env.HIVE_SKILLS_PUBLIC_URL, port),
   dataDir,
   databasePath: resolve(dataDir, 'registry.sqlite'),
   sessionSecret: resolveSessionSecret(process.env, host),

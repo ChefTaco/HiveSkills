@@ -88,6 +88,11 @@ test('targets store a deduplicated Magnus binding and filter by exact node id', 
   assert.deepEqual(await get('/admin/targets?nodeId=node-a'), { status: 200, body: [{ ...legacyTargets[0], magnusNodeId: 'node-a' }] });
   assert.equal((await put('agent-1', { ...base, magnusNodeId: null })).status, 200);
   assert.deepEqual(await get('/admin/targets'), { status: 200, body: legacyTargets });
+  // Clearing the node alone also drops the agents still stored for it.
+  assert.equal((await put('agent-1', { ...base, magnusNodeId: 'node-a', agentRefs: ['node-a~default'] })).status, 200);
+  assert.deepEqual(await put('agent-1', { ...base, magnusNodeId: null }), { status: 200, body: { ok: true } });
+  assert.deepEqual(await get('/admin/targets'), { status: 200, body: legacyTargets });
+  assert.equal(store.targetBinding('agent-1'), undefined);
 });
 
 test('invalid bindings and filters are rejected with the existing error format', async () => {

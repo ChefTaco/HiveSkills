@@ -22,7 +22,7 @@ export type AuditExportRow = {
 /** Stored action names mapped to suite action names, with the kind of record they act on. */
 const ACTIONS: Record<string, { action: string; target: string; withId: boolean }> = {
   login: { action: 'session.login', target: 'session', withId: false },
-  // The stored logout subject is the revoked session id: never exported.
+  // Older rows store the revoked session id as the logout subject: never exported.
   logout: { action: 'session.logout', target: 'session', withId: false },
   seed: { action: 'release.seed', target: 'release', withId: true },
   'skill.create': { action: 'skill.create', target: 'skill', withId: true },
