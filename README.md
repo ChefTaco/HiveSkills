@@ -54,9 +54,9 @@ NODE_EXTRA_CA_CERTS=/config/tls/server.crt
 EOF
 
 docker run --rm -v hiveskills-data:/data -v "$PWD/tls:/config/tls:ro" \
-  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.7.1 check
+  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.8.0 check
 docker run -d --name hiveskills -p 127.0.0.1:4030:4030 -v hiveskills-data:/data \
-  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.7.1
+  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.8.0
 
 # Once it reports healthy
 curl --cacert tls/server.crt https://localhost:4030/healthz
