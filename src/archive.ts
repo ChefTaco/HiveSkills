@@ -1,7 +1,7 @@
 import { readArchive } from "../scripts/archive-utils.mjs";
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, resolve, sep } from 'node:path';
 import { config } from './config.js';
 
 const safeVersion = (version: string): boolean => /^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(version);
@@ -9,10 +9,6 @@ const safeSlug = (slug: string): boolean => /^[a-z0-9][a-z0-9-]{1,62}$/.test(slu
 export const assertSkillId = (slug: string, version?: string): void => {
   if (!safeSlug(slug)) throw new Error('Skill slug must be lowercase letters, numbers, and hyphens');
   if (version !== undefined && !safeVersion(version)) throw new Error('Version must be a semantic version');
-};
-
-export const validateArchive = (path: string): void => {
-  readArchive(readFileSync(path));
 };
 
 export const persistArchive = (slug: string, version: string, bytes: Buffer): { path: string; sha256: string } => {
@@ -29,4 +25,4 @@ export const persistArchiveFromFile = (slug: string, version: string, source: st
   return persistArchive(slug, version, readFileSync(source));
 };
 
-export const removeArchive = (path: string): void => { if (path.startsWith(resolve(config.dataDir, 'archives')) && existsSync(path)) unlinkSync(path); };
+export const removeArchive = (path: string): void => { if (path.startsWith(resolve(config.dataDir, 'archives') + sep) && existsSync(path)) unlinkSync(path); };

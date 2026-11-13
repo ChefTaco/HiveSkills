@@ -17,7 +17,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { MiddlewareHandler } from 'hono';
 import { config } from './config.js';
 import { persistArchive, assertSkillId, removeArchive } from './archive.js';
-import { authenticateOsUser, createSession, readAuth, removeSession, sessionCookie } from './auth.js';
+import { authenticateOsUser, createSession, readAuth, removeSession, sessionCookie, validUsername } from './auth.js';
 import { store, deploymentJournal } from './db.js';
 import { requireMagnusExecutor, executeMagnusJob, magnusExecutorConfiguration } from './magnus-deployment.js';
 import { type Publication } from './deployment-journal.js';
@@ -107,7 +107,12 @@ const requireAuditReader: MiddlewareHandler<{ Variables: Variables }> = async (c
   return requireAuth(true)(c, next);
 };
 
-const requestJson = async (c: { req: { json: () => Promise<unknown> } }): Promise<JsonObject> => asObject(await c.req.json());
+// A body that is not JSON is the caller's error, not a server fault.
+const requestJson = async (c: { req: { json: () => Promise<unknown> } }): Promise<JsonObject> => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { throw new HTTPException(400, { message: 'Invalid JSON body' }); }
+  return asObject(body);
+};
 
 const browserInput = <T>(schema:z.ZodType<T>, value:unknown):T => {
   const result=schema.safeParse(value);
@@ -239,6 +244,8 @@ app.post('/auth/login', async (c) => {
   const body = await requestJson(c);
   const username = text(body.username, 'username', 32);
   const password = text(body.password, 'password', 1024);
+  // A name no OS account can have never reaches PAM, so it must not occupy a throttle slot either.
+  if (!validUsername(username)) throw new HTTPException(401, { message: 'OS authentication failed' });
   for (const [key, expires] of loginAttempts) if (expires <= Date.now()) loginAttempts.delete(key);
   if (loginAttempts.size >= 1000 && !loginAttempts.has(username)) throw new HTTPException(429, { message: 'Try again shortly' });
   const previous = loginAttempts.get(username) ?? 0;
@@ -255,9 +262,10 @@ app.post('/auth/login', async (c) => {
 });
 
 app.post('/auth/logout', (c) => {
-  const id = removeSession(c.req.header('cookie'));
+  // Only a session this registry issued is revoked and audited; other cookies are just cleared.
+  const username = removeSession(c.req.header('cookie'));
   c.header('Set-Cookie', sessionCookie('', 0));
-  if (id) store.audit('unknown', 'logout', id, {});
+  if (username) store.audit(username, 'logout', 'session', {});
   return c.body(null, 204);
 });
 
@@ -441,7 +449,8 @@ app.put('/admin/targets/:target', requireAuth(true), async (c) => {
   if (body.magnusNodeId !== undefined || body.agentRefs !== undefined) {
     const current = store.targetBinding(name);
     const magnusNodeId = body.magnusNodeId === undefined ? current?.magnusNodeId ?? null : body.magnusNodeId;
-    const agentRefs = body.agentRefs === undefined ? current?.agentRefs ?? [] : [...new Set(body.agentRefs)];
+    // Clearing the node clears its agents with it; only explicitly sent agents can conflict.
+    const agentRefs = body.agentRefs === undefined ? (magnusNodeId === null ? [] : current?.agentRefs ?? []) : [...new Set(body.agentRefs)];
     if (agentRefs.some((ref) => ref.slice(0, ref.indexOf('~')) !== magnusNodeId)) throw new HTTPException(400, { message: 'Invalid target' });
     binding = magnusNodeId === null ? null : { magnusNodeId, agentRefs };
   }

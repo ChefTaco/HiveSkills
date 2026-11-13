@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `POST /auth/logout` only revokes and audits a session cookie this registry signed. Previously any unauthenticated request could add a `logout` audit record with a caller-chosen subject. Logout records now name the account that signed out and use `session` as the subject instead of the session id.
+- Sign-in attempts with a name no OS account can have no longer occupy the sign-in throttle, so they cannot lock every other account out with `429`. They are still answered with `401`.
+- A request body that is not valid JSON is answered with `400` (`Invalid JSON body`) instead of `500`.
+- `PUT /admin/targets/:target` with `magnusNodeId: null` clears the link as documented even while agent references are stored; it was rejected with `400` unless `agentRefs: []` was sent first.
+- A trailing slash in `HIVE_SKILLS_PUBLIC_URL` is ignored. It produced `//v1/...` archive links that agents refuse as an unexpected archive path.
+
 ## [1.7.1] - 2026-11-13
 
 ### Security

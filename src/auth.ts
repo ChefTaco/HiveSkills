@@ -6,7 +6,7 @@ import type { AuthContext } from './types.js';
 
 const cookieName = 'hive_skills_session';
 const sign = (value: string): string => createHmac('sha256', config.sessionSecret).update(value).digest('base64url');
-const validUsername = (username: string): boolean => /^[a-z_][a-z0-9_-]{0,31}$/i.test(username);
+export const validUsername = (username: string): boolean => /^[a-z_][a-z0-9_-]{0,31}$/i.test(username);
 
 export function createOsAuthenticator(spawnPam: typeof spawn = spawn, maxConcurrent = 4): (username: string, password: string) => Promise<boolean> {
   let activePam = 0;
@@ -39,19 +39,27 @@ export const createSession = (username: string): string => {
 export const sessionCookie = (token: string, maxAge = 12 * 60 * 60): string =>
   `${cookieName}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`;
 
-export const readAuth = (cookieHeader: string | undefined): AuthContext | undefined => {
+/** The session id from a cookie carrying this registry's signature; undefined otherwise. */
+const sessionId = (cookieHeader: string | undefined): string | undefined => {
   const token = cookieHeader?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
   if (!token) return undefined;
   const [id, signature, ...extra] = token.split('.');
   if (!id || !signature || extra.length > 0) return undefined;
   const expected = Buffer.from(sign(id));
   const actual = Buffer.from(signature);
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return undefined;
-  const session = store.getSession(id);
+  return actual.length === expected.length && timingSafeEqual(actual, expected) ? id : undefined;
+};
+
+export const readAuth = (cookieHeader: string | undefined): AuthContext | undefined => {
+  const id = sessionId(cookieHeader);
+  const session = id === undefined ? undefined : store.getSession(id);
   return session ? { username: session.username, isAdmin: config.adminUsers.has(session.username) } : undefined;
 };
 
+/** Revokes the signed, unexpired session in the cookie and returns its account; undefined when there is none. */
 export const removeSession = (cookieHeader: string | undefined): string | undefined => {
-  const token = cookieHeader?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
-  const id = token?.split('.')[0]; if (id) store.deleteSession(id); return id;
+  const id = sessionId(cookieHeader);
+  const session = id === undefined ? undefined : store.getSession(id);
+  if (session) store.deleteSession(session.id);
+  return session?.username;
 };
