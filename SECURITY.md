@@ -12,7 +12,7 @@ Report them privately through
 [GitHub private vulnerability reporting](https://github.com/ChefTaco/HiveSkills/security/advisories/new).
 Please include:
 
-- the affected component (Router, IAM, HiveMem, Skills, or an SDK) and version or commit
+- the affected component (registry server, Hermes sync client) and version or commit
 - steps to reproduce, or a proof of concept
 - the impact you expect
 
@@ -23,4 +23,5 @@ advisory will credit you unless you ask not to be named.
 
 - Run every service over TLS in production, and keep admin listeners on a private network.
 - Keep `.env` files, IAM signing keys, and TLS keys readable only by root or the service user.
-- Rotate secrets with `npm run rotate:secrets` (see [docs/SECRET_ROTATION.md](docs/SECRET_ROTATION.md)).
+- `HIVE_SKILLS_SESSION_SECRET` signs administrator sessions; changing it ends every existing
+  session. See [README.md](README.md) for configuration.

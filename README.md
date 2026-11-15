@@ -16,18 +16,19 @@ The registry is intentionally small and local-first. SQLite records skills, rele
 
 ## Install
 
-HiveSkills 1.3 ships only as a container image, `ghcr.io/cheftaco/hiveskills`, for
+Since 1.3, HiveSkills ships only as a container image, `ghcr.io/cheftaco/hiveskills`, for
 `linux/amd64` and `linux/arm64`. Each release is tagged with its exact version (for example
-`1.3.1`; there is no `latest` tag), and its
+`1.8.0`; there is no `latest` tag), and its
 [GitHub release](https://github.com/ChefTaco/HiveSkills/releases) records the image digest.
 
 **With the Hive suite.** HiveSkills is normally installed by `hive.sh`, the
 [Hive suite controller](https://github.com/ChefTaco/hive#install-the-suite), in both the
 `core` and `full` profiles. The controller pins the image by digest from a signed release
 manifest and writes its configuration, secrets and TLS. In the suite, administrators sign in
-through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins.
+through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins; Hive 3.9.1 pins
+HiveSkills 1.8.0.
 
-**Legacy npm packages.** HiveSkills 1.3 is not published on npm. The npm package
+**Legacy npm packages.** HiveSkills 1.3 and later are not published on npm. The npm package
 `@hivemagnus/hive-skills` (the name this source still uses), the `@hivemagnus/hive` launcher's
 `--services skills` option and the image `ghcr.io/cheftaco/hive-skills` are the legacy 1.x line
 from the Hive repository: `npm install` and `npx` resolve `@hivemagnus/hive-skills` to 1.2.2, not
@@ -252,7 +253,10 @@ with a build provenance attestation, and records the digest in a GitHub release.
 
 ## Managed upgrades
 
-Use `hive upgrade --dry-run`, then `hive upgrade` for the enrolled release bundle. This server's
+A Hive suite installation upgrades HiveSkills with the suite controller (`./hive.sh upgrade`; see
+the [Hive README](https://github.com/ChefTaco/hive#upgrading)). The rest of this paragraph is for
+installations enrolled with the retired npm `hive` launcher: use `hive upgrade --dry-run`, then
+`hive upgrade` for the enrolled release bundle. This server's
 `upgrade` and `rollback` commands delegate to the same owner-run launcher. `migrate --plan --json`
 is read-only; migration requires a verified backup. Set `HIVE_AUTO_MIGRATE=true` explicitly for
 startup migrations outside a managed install. Slow or one-way automatic migrations are refused.
@@ -284,9 +288,9 @@ the signed native outcome under the original durable job ID. An interrupted or
 unknown operation is reconciled through that original receipt and never replayed
 under a new ID. A queued approval that expires cannot dispatch.
 
-The Magnus adapter disables the legacy SSH worker. Existing standalone native
-console routes remain available for recovery when the adapter is unconfigured;
-interrupted legacy jobs are retained as unknown instead of automatically retried.
+The Magnus adapter disables the legacy SSH worker. The existing standalone deployment
+route (`POST /admin/deployments/:target`) remains available for recovery when the adapter is
+unconfigured; interrupted legacy jobs are retained as unknown instead of automatically retried.
 Rehearsal mode disables both workers and preserves pending records. Run an explicit
 backed-up `hive-skills migrate` before starting the new schema on existing state.
 
