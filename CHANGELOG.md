@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Require `@hivemagnus/hive-common` 0.5.0. In HiveSkills this changes only the audit export's `details` scrubbing (linear-time, and URL credentials with only a user or only a password are masked) and checks the Oathweave verifier and health settings at startup. Routes, responses and accepted tokens are unchanged.
+- The HiveEvent feed is built with the shared `buildFeedPage()` and feed-position helpers, the baseline security headers come from the shared `securityHeaders()` middleware, and the session cookie signature is compared with `timingSafeEqualString()`. Pages, ordering, the 14-day window, cursors (same encoding, so cursors from earlier releases keep working), headers and status codes are unchanged. A feed cursor with extra fields, an ID longer than 256 characters or a control character, none of which this registry writes, is now answered with `400`.
+
 ## [1.8.0] - 2026-11-13
 
 ### Fixed

@@ -209,3 +209,32 @@ test('the public URL never ends with a slash, so archive links match what agents
   assert.equal(publicUrlFrom('https://registry.test', 4030), 'https://registry.test');
   assert.equal(publicUrlFrom(undefined, 4031), 'https://localhost:4031');
 });
+
+test('every response carries the baseline security headers, errors and not-found included', async () => {
+  const { createSession } = await import('./auth.js');
+  const session = 'hive_skills_session=' + createSession('admin');
+  const responses = [
+    await app.request('https://registry.test/v1/skills'),
+    await app.request('https://registry.test/health/live'),
+    await app.request('https://registry.test/admin/skills'),                       // 401
+    await app.request('https://registry.test/v1/skills/missing-skill'),            // 404
+    await app.request('https://registry.test/admin/skills', { method: 'POST', headers: { cookie: session, 'content-type': 'application/json' }, body: '{' }), // 400
+  ];
+  assert.deepEqual(responses.map((response) => response.status), [200, 200, 401, 404, 400]);
+  for (const response of responses) {
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  }
+});
+
+test('a session cookie is accepted only with its exact signature', async () => {
+  const { createSession, readAuth } = await import('./auth.js');
+  const token = createSession('admin');
+  const [id, signature] = token.split('.') as [string, string];
+  assert.deepEqual(readAuth(`hive_skills_session=${token}`), { username: 'admin', isAdmin: true });
+  const flipped = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1);
+  for (const value of [`${id}.${flipped}`, `${id}.${signature.slice(1)}`, `${id}.${signature}x`, `${id}.`, `${id}.${signature}.extra`, id]) {
+    assert.equal(readAuth(`hive_skills_session=${value}`), undefined, value);
+  }
+});

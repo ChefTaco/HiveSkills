@@ -1,4 +1,5 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+import { timingSafeEqualString } from '@hivemagnus/hive-common/secrets';
 import { spawn } from 'node:child_process';
 import { config } from './config.js';
 import { store } from './db.js';
@@ -45,9 +46,7 @@ const sessionId = (cookieHeader: string | undefined): string | undefined => {
   if (!token) return undefined;
   const [id, signature, ...extra] = token.split('.');
   if (!id || !signature || extra.length > 0) return undefined;
-  const expected = Buffer.from(sign(id));
-  const actual = Buffer.from(signature);
-  return actual.length === expected.length && timingSafeEqual(actual, expected) ? id : undefined;
+  return timingSafeEqualString(signature, sign(id)) ? id : undefined;
 };
 
 export const readAuth = (cookieHeader: string | undefined): AuthContext | undefined => {

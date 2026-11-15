@@ -3,7 +3,7 @@ import { configuredOathweaveVerifier } from './identity.js';
 import { OathweaveError } from '@hivemagnus/hive-common/oathweave';
 import { AUDIT_EXPORT_DEFAULT_LIMIT, AUDIT_EXPORT_MAX_LIMIT, AUDIT_READ_PERMISSION, auditExportPage, decodeAuditCursor } from './audit-export.js';
 import { createHealth } from '@hivemagnus/hive-common/health';
-import { requestContext } from '@hivemagnus/hive-common/hono';
+import { requestContext, securityHeaders } from '@hivemagnus/hive-common/hono';
 import { parseFeedQuery } from '@hivemagnus/hive-common/events';
 import { decodePosition, feedSince, hiveEventPage, type FeedPosition } from './hive-events.js';
 import { maintenanceActive } from './release/runtime.js';
@@ -132,12 +132,8 @@ app.use('*', bodyLimit({ maxSize: 70 * 1024 * 1024 }));
 
 for (const target of config.targets) store.seedTarget(target);
 
-app.use('*', async (c, next) => {
-  c.header('X-Content-Type-Options', 'nosniff');
-  c.header('Referrer-Policy', 'no-referrer');
-  c.header('X-Frame-Options', 'DENY');
-  await next();
-});
+// nosniff, no-referrer and frame DENY, set before each handler runs.
+app.use('*', securityHeaders());
 
 // The standalone web UI is retired; HiveXUI is the UI.
 app.get('/', (c) => hiveXuiStubResponse(c, config.hivexuiUrl));
