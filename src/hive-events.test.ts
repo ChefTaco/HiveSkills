@@ -164,3 +164,35 @@ test('drops events that fail validation without breaking the page', () => {
   const loose = hiveEventPage({ deployments: [{ ...good, magnusNodeId: 'Node.A', agentRefs: ['Node.A~ops'] }], audit: [], receipts: [] }, undefined, 10, now);
   assert.equal(loose.data[0]?.subject, undefined);
 });
+
+test('cursors keep their format and the exact-time rule on the shared feed helpers', async () => {
+  const { encodeCursor } = await import('@hivemagnus/hive-common/events');
+  const cursor = (value: Record<string, string | number>) => encodeCursor(value);
+  // A cursor written by earlier releases ({ t, i } in this order) is the same string and still continues the feed.
+  const expected = await all();
+  const middle = expected[2]!;
+  const earlier = cursor({ t: middle.occurredAt, i: middle.id });
+  assert.equal(encodePosition(middle), earlier);
+  assert.deepEqual((await feed(`?limit=200&after=${earlier}`)).body.data.map((event) => event.id), expected.slice(3).map((event) => event.id));
+  // Still refused: a time not written by this feed (no milliseconds), a missing or empty ID.
+  for (const value of [{ t: '2026-11-01T00:00:00Z', i: 'x' }, { t: '2026-11-01T00:00:00.000+00:00', i: 'x' }, { t: '2026-11-01T00:00:00.000Z', i: '' }, { t: '2026-11-01T00:00:00.000Z' }]) {
+    assert.equal(decodePosition(cursor(value)), null, JSON.stringify(value));
+    assert.equal((await feed(`?after=${cursor(value)}`)).status, 400, JSON.stringify(value));
+  }
+  // Now also refused: extra fields and IDs no event can have.
+  for (const value of [{ t: '2026-11-01T00:00:00.000Z', i: 'x', x: 1 }, { t: '2026-11-01T00:00:00.000Z', i: 'x'.repeat(257) }, { t: '2026-11-01T00:00:00.000Z', i: 'a\u0001b' }]) {
+    assert.equal(decodePosition(cursor(value)), null, JSON.stringify(value));
+  }
+});
+
+test('events at the same time are ordered by ID, and a cursor between them splits them exactly', () => {
+  const time = at(hour);
+  const records = ['job-b', 'job-c', 'job-a'].map((id) => ({ id, target: 'agent-1', status: 'completed', result: null, updatedAt: time, magnusNodeId: null, agentRefs: [] }));
+  const page = hiveEventPage({ deployments: records, audit: [], receipts: [] }, undefined, 2, now);
+  assert.deepEqual(page.data.map((event) => event.id), ['hiveskills:deployment:job-a:completed', 'hiveskills:deployment:job-b:completed']);
+  const position = decodePosition(page.nextCursor!);
+  assert.deepEqual(position, { occurredAt: time, id: 'hiveskills:deployment:job-b:completed' });
+  const rest = hiveEventPage({ deployments: records, audit: [], receipts: [] }, position!, 2, now);
+  assert.equal(rest.nextCursor, null);
+  assert.deepEqual(rest.data.map((event) => event.id), ['hiveskills:deployment:job-c:completed']);
+});

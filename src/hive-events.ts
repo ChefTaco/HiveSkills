@@ -1,4 +1,4 @@
-import { decodeCursor, encodeCursor, feedPage, validateHiveEvent, type HiveEvent, type HiveEventSeverity, type Page } from '@hivemagnus/hive-common/events';
+import { buildFeedPage, decodeFeedPosition, encodeFeedPosition, feedSince as sharedFeedSince, type FeedPosition as SharedFeedPosition, type HiveEvent, type HiveEventSeverity, type Page } from '@hivemagnus/hive-common/events';
 
 /** Events older than this are not served. */
 export const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -12,7 +12,7 @@ export type AuditRecord = { id: number; action: string; subject: string; details
 export type ReceiptRecord = { target: string; receiptJson: string | null; updatedAt: string } & FleetLink;
 /** Stored records an event can be derived from, at or after `since`. */
 export type HiveEventRecords = { deployments: DeploymentRecord[]; audit: AuditRecord[]; receipts: ReceiptRecord[] };
-export type FeedPosition = { occurredAt: string; id: string };
+export type FeedPosition = SharedFeedPosition;
 
 /** Only terminal or attention-needing deployment states become events. */
 export const EVENT_DEPLOYMENT_STATUSES = ['completed', 'failed', 'unknown'] as const;
@@ -111,24 +111,21 @@ const receiptEvent = (receipt: ReceiptRecord): HiveEvent | null => {
   });
 };
 
-const after = (left: FeedPosition, right: FeedPosition): boolean =>
-  left.occurredAt > right.occurredAt || (left.occurredAt === right.occurredAt && left.id > right.id);
-
-/** Read a cursor from `encodePosition`; null for anything else. */
+/**
+ * Read a cursor from `encodePosition`; null for anything else. The shared decoder refuses other
+ * or extra fields and IDs it would not encode; the time must also be in the exact form this feed
+ * writes (`toISOString()`), as before.
+ */
 export function decodePosition(cursor: string): FeedPosition | null {
-  let value: Record<string, string | number>;
-  try { value = decodeCursor(cursor); } catch { return null; }
-  const occurredAt = typeof value['t'] === 'string' ? iso(value['t']) : null;
-  if (!occurredAt || occurredAt !== value['t'] || typeof value['i'] !== 'string' || value['i'] === '') return null;
-  return { occurredAt, id: value['i'] };
+  const position = decodeFeedPosition(cursor);
+  return position && iso(position.occurredAt) === position.occurredAt ? position : null;
 }
 
-export const encodePosition = (event: FeedPosition): string => encodeCursor({ t: event.occurredAt, i: event.id });
+export const encodePosition = (event: FeedPosition): string => encodeFeedPosition(event);
 
 /** The earliest record time a page can need: the retention start or the cursor, whichever is later. */
 export function feedSince(position: FeedPosition | undefined, now: number): string {
-  const retention = new Date(now - RETENTION_MS).toISOString();
-  return position && position.occurredAt > retention ? position.occurredAt : retention;
+  return sharedFeedSince({ after: position, retentionMs: RETENTION_MS, now }) as string;
 }
 
 /**
@@ -136,19 +133,6 @@ export function feedSince(position: FeedPosition | undefined, now: number): stri
  * invalid one is dropped and counted, never served.
  */
 export function hiveEventPage(records: HiveEventRecords, position: FeedPosition | undefined, limit: number, now: number, onDropped: (count: number) => void = () => {}): Page<HiveEvent> {
-  const retention = new Date(now - RETENTION_MS).toISOString();
   const candidates = [...records.deployments.map(deploymentEvent), ...records.audit.map(auditEvent), ...records.receipts.map(receiptEvent)];
-  const events: HiveEvent[] = [];
-  let dropped = 0;
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const checked = validateHiveEvent(candidate, { strict: true });
-    if (!checked.ok) { dropped++; continue; }
-    const value = checked.value;
-    if (value.occurredAt < retention || (position && !after(value, position))) continue;
-    events.push(value);
-  }
-  if (dropped) onDropped(dropped);
-  events.sort((left, right) => (after(left, right) ? 1 : after(right, left) ? -1 : 0));
-  return feedPage(events.slice(0, limit + 1), limit, encodePosition);
+  return buildFeedPage(candidates, { after: position, retentionMs: RETENTION_MS, now, limit, onDropped: (count) => onDropped(count) });
 }
