@@ -25,8 +25,8 @@ Since 1.3, HiveSkills ships only as a container image, `ghcr.io/cheftaco/hiveski
 [Hive suite controller](https://github.com/ChefTaco/hive#install-the-suite), in both the
 `core` and `full` profiles. The controller pins the image by digest from a signed release
 manifest and writes its configuration, secrets and TLS. In the suite, administrators sign in
-through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins; Hive 3.9.1 pins
-HiveSkills 1.8.0.
+through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins; Hive 3.11.0 pins
+HiveSkills 1.8.1.
 
 **Legacy npm packages.** HiveSkills 1.3 and later are not published on npm. The npm package
 `@hivemagnus/hive-skills` (the name this source still uses), the `@hivemagnus/hive` launcher's
@@ -175,14 +175,23 @@ registry installations do not synchronize Skills state.
 
 ## API overview
 
+`docs/openapi.json` is the full route and schema snapshot (`npm run check:openapi` keeps it in
+step with the code).
+
 - `GET /` – retired web UI: a static page pointing to HiveXUI, or a `302` to `HIVEXUI_URL` when set
 - `GET /healthz` – unauthenticated readiness (`GET /health/ready` returns the suite-standard body; `GET /health/live` is liveness)
 - `GET /v1/skills` / `GET /v1/skills/:slug` – public catalog
-- `GET /v1/agent/manifest` – Hermes pull manifest
+- `GET /v1/agent/manifest` – Hermes pull manifest; `POST /v1/agent/receipts/:target` – the bridge's install receipt
 - `GET /v1/skills/:slug/releases/:version/archive[?channel=canary]` – archive payload, only for the release currently promoted on that channel (default `stable`)
-- `POST /auth/login` – PAM-backed OS login
-- `POST /admin/skills`, `PATCH /admin/skills/:slug`, `DELETE /admin/skills/:slug`
-- `POST /admin/skills/:slug/releases`, `POST /admin/deployments/:target`
+- `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` – PAM-backed OS sign-in and the current session
+- `GET /admin/skills`, `POST /admin/skills`, `PATCH /admin/skills/:slug`, `DELETE /admin/skills/:slug`
+- `GET /admin/skills/:slug/releases`, `POST /admin/skills/:slug/releases`
+- `GET /admin/channels`, `PUT /admin/channels/:channel/:slug` (promote), `DELETE /admin/channels/:channel/:slug` (withdraw)
+- `GET /admin/targets`, `PUT /admin/targets/:name`, `POST /admin/targets/:name/enroll`, `GET /admin/receipts`
+- `GET /admin/deployments`, `GET /admin/deployments/capabilities`, `POST /admin/deployments/:target`,
+  `GET /admin/deployments/jobs/:id`, `POST /admin/deployments/jobs/:id/approve`, `POST /admin/deployments/jobs/:id/reconcile`
+- `GET /admin/audit`, `GET /admin/updates`
+- `GET /v1/hive/events` and `GET /v1/audit/export` – see below
 
 Every write and deployment action is audit logged with the authenticated OS username.
 
@@ -291,7 +300,8 @@ under a new ID. A queued approval that expires cannot dispatch.
 The Magnus adapter disables the legacy SSH worker. The existing standalone deployment
 route (`POST /admin/deployments/:target`) remains available for recovery when the adapter is
 unconfigured; interrupted legacy jobs are retained as unknown instead of automatically retried.
-Rehearsal mode disables both workers and preserves pending records. Run an explicit
+Rehearsal mode (`HIVE_REHEARSAL=true`) disables both workers and preserves pending records;
+`HIVE_SKILLS_DEPLOYMENT_WORKER_ENABLED=false` does the same outside a rehearsal. Run an explicit
 backed-up `hive-skills migrate` before starting the new schema on existing state.
 
 

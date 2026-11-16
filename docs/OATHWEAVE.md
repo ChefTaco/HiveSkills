@@ -27,9 +27,10 @@ Do not put live links or credentials in Git. Prepare and review links independen
 for each installation before applying configuration. No API request creates a
 replacement identity to impersonate a legacy account.
 
-The integration is under development. A passing unit suite does not authorize
-production adoption. Restore rehearsal, permissions, native clients, and browser
-workflow parity must pass before switching an existing installation.
+Hive suite installations get this configuration from the suite controller. Before
+switching an existing standalone installation from OS-account sign-in, rehearse a
+restore and check permissions, native clients and the HiveXUI workflows; a passing
+unit suite alone is not enough.
 
 Browser-authorized deployment mutations remain unavailable until a Magnus job
 adapter is configured. They cannot fall through to the retained native SSH worker.
