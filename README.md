@@ -25,7 +25,7 @@ Since 1.3, HiveSkills ships only as a container image, `ghcr.io/cheftaco/hiveski
 [Hive suite controller](https://github.com/ChefTaco/hive#install-the-suite), in both the
 `core` and `full` profiles. The controller pins the image by digest from a signed release
 manifest and writes its configuration, secrets and TLS. In the suite, administrators sign in
-through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins; Hive 3.11.0 pins
+through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins; Hive 3.12.2 pins
 HiveSkills 1.8.1.
 
 **Legacy npm packages.** HiveSkills 1.3 and later are not published on npm. The npm package
