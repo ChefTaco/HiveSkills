@@ -996,6 +996,90 @@
         ],
         "type": "object"
       },
+      "PinnedRelease": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "archiveUrl": {
+            "type": "string"
+          },
+          "channels": {
+            "items": {
+              "enum": [
+                "stable",
+                "canary"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "compatibility": {
+            "additionalProperties": false,
+            "properties": {
+              "maxHermesVersion": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "minHermesVersion": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "minHermesVersion",
+              "maxHermesVersion"
+            ],
+            "type": "object"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "version",
+          "sha256",
+          "size",
+          "notes",
+          "compatibility",
+          "channels",
+          "archiveUrl",
+          "createdAt"
+        ],
+        "type": "object"
+      },
       "PromoteRelease": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -1501,6 +1585,11 @@
       },
       "resourceBearer": {
         "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "targetToken": {
+        "description": "Target enrollment token, sent with ?target=<name>",
         "scheme": "bearer",
         "type": "http"
       }
@@ -2736,8 +2825,9 @@
         "summary": "GET /v1/skills/{slug}"
       }
     },
-    "/v1/skills/{slug}/releases/{version}/archive": {
+    "/v1/skills/{slug}/releases/{version}": {
       "get": {
+        "description": "Digest, archive size, Hermes compatibility and the channels this version is promoted on. Requires an enrolled target (assigned the skill) or a registry administrator.",
         "parameters": [
           {
             "in": "path",
@@ -2754,20 +2844,145 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Enrolled target name; send its enrollment token as the bearer token",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Success; see the native API reference for payloads"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinnedRelease"
+                }
+              }
+            },
+            "description": "The release"
           },
           "401": {
-            "description": "Authentication required"
+            "description": "Target enrollment or sign-in required"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Registry administrator access, or a target assigned this skill, required"
+          },
+          "404": {
+            "description": "No such release of an enabled skill"
           }
         },
-        "summary": "GET /v1/skills/{slug}/releases/{version}/archive"
+        "security": [
+          {
+            "targetToken": []
+          },
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "Metadata of one immutable release by exact version, promoted or not"
+      }
+    },
+    "/v1/skills/{slug}/releases/{version}/archive": {
+      "get": {
+        "description": "The release promoted on the requested channel (default stable) is public. Any other immutable release of an enabled skill needs an enrolled target (assigned the skill) or a registry administrator; anonymous callers get 404 for it. The stored bytes are checked against the release digest before they are served; X-Content-SHA256 carries that digest.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Enrolled target name; send its enrollment token as the bearer token",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "stable (default) or canary; selects the public promoted release",
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "enum": [
+                "stable",
+                "canary"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The archive bytes",
+            "headers": {
+              "X-Content-SHA256": {
+                "description": "SHA-256 of the archive, equal to the release digest",
+                "schema": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid channel"
+          },
+          "401": {
+            "description": "Target enrollment or sign-in required"
+          },
+          "403": {
+            "description": "Registry administrator access, or a target assigned this skill, required"
+          },
+          "404": {
+            "description": "Not the promoted release (anonymous), or no such release or archive"
+          },
+          "500": {
+            "description": "The stored archive no longer matches the release digest"
+          }
+        },
+        "security": [
+          {},
+          {
+            "targetToken": []
+          },
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "Skill release archive with its SHA-256 digest"
       }
     }
   },

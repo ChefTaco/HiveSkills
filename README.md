@@ -182,7 +182,8 @@ step with the code).
 - `GET /healthz` – unauthenticated readiness (`GET /health/ready` returns the suite-standard body; `GET /health/live` is liveness)
 - `GET /v1/skills` / `GET /v1/skills/:slug` – public catalog
 - `GET /v1/agent/manifest` – Hermes pull manifest; `POST /v1/agent/receipts/:target` – the bridge's install receipt
-- `GET /v1/skills/:slug/releases/:version/archive[?channel=canary]` – archive payload, only for the release currently promoted on that channel (default `stable`)
+- `GET /v1/skills/:slug/releases/:version/archive[?channel=canary]` – archive payload with `X-Content-SHA256`; public only for the release currently promoted on that channel (default `stable`), any other release needs a pinned-release reader (see below)
+- `GET /v1/skills/:slug/releases/:version` – metadata of one release by exact version for a pinned-release reader
 - `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` – PAM-backed OS sign-in and the current session
 - `GET /admin/skills`, `POST /admin/skills`, `PATCH /admin/skills/:slug`, `DELETE /admin/skills/:slug`
 - `GET /admin/skills/:slug/releases`, `POST /admin/skills/:slug/releases`
@@ -206,9 +207,30 @@ list. Preserve `~/.config/hive-skills/bridge.env` on that target for its own
 `HIVE_SKILLS_TARGET` and `HIVE_SKILLS_TARGET_TOKEN`; the installer reads this
 optional file without replacing it. The manifest of a canary-enrolled target
 points at channel-scoped archive URLs. Unpromoted, superseded and withdrawn
-releases cannot be downloaded. Promoted archives remain public within the
+releases cannot be downloaded anonymously. Promoted archives remain public within the
 registry's network boundary: target skill lists select distribution, they are
 not an archive confidentiality boundary.
+
+### Pinned releases
+
+Releases are immutable, so a definition can pin a skill to an exact version and
+digest (`skills.pinned-release.v1`). `GET /v1/skills/:slug/releases/:version`
+returns `slug`, `version`, `sha256`, `size` (bytes, `null` if the stored archive
+is missing), `notes`, `compatibility` (`minHermesVersion`, `maxHermesVersion`),
+`channels` (where this version is promoted now), `archiveUrl` and `createdAt`.
+`GET /v1/skills/:slug/releases/:version/archive` then serves that exact release
+whether or not it is promoted. Both need a pinned-release reader:
+
+- an enrolled target: `?target=<name>` with `Authorization: Bearer <target token>`,
+  the same credential as the manifest and receipts; a target enrolled with a skill
+  list gets `403` for other skills; or
+- a registry administrator (OS session or linked Oathweave identity).
+
+Anonymous callers get `401` from the metadata route, and the archive route keeps
+answering `404` for anything but the promoted release. Releases of a disabled or
+deleted skill are not served. Every archive, promoted or pinned, is checked
+against its release digest before it is sent; a stored file that no longer
+matches is refused with `500` and never served.
 
 A target can optionally be linked to the fleet: `PUT /admin/targets/:name` also
 accepts `magnusNodeId` (`[A-Za-z0-9._-]{1,128}`) and `agentRefs`, up to 64 unique

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,9 +63,10 @@ test('deployment targets come from configuration', async () => {
 test('public archives are limited to the release promoted on the requested channel', async () => {
   const archive = join(process.env.HIVE_SKILLS_DATA_DIR!, 'archive-fixture.tgz');
   writeFileSync(archive, 'fixture');
+  const sha256 = createHash('sha256').update('fixture').digest('hex');
   store.createSkill({ slug: 'fixture', name: 'Fixture', description: 'Archive fixture', homepage: null, enabled: true });
   for (const version of ['1.0.0', '1.1.0', '2.0.0']) {
-    store.addRelease({ skillSlug: 'fixture', version, sha256: 'c'.repeat(64), archivePath: archive, notes: null, createdAt: new Date().toISOString() });
+    store.addRelease({ skillSlug: 'fixture', version, sha256, archivePath: archive, notes: null, createdAt: new Date().toISOString() });
   }
   const download = (version: string, query = '') => app.request(`https://registry.test/v1/skills/fixture/releases/${version}/archive${query}`);
   assert.equal((await download('1.0.0')).status, 404);

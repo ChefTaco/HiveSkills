@@ -65,6 +65,8 @@ export const store = {
         if (enforceCompatibility && !compatibleVersion(hermesVersion, release.minHermesVersion, release.maxHermesVersion)) return [];
         return [{ ...skill, release }];
       }),
+  /** The channels this exact release is promoted on, in channel order. */
+  releaseChannels: (slug: string, version: string): string[] => (db.prepare('SELECT channel FROM channel_releases WHERE skill_slug=? AND version=? ORDER BY channel').all(slug, version) as Array<{ channel: string }>).map((row) => row.channel),
   promoteRelease: (slug: string, version: string, channel: string): void => { db.prepare('INSERT INTO channel_releases VALUES (?,?,?) ON CONFLICT(channel,skill_slug) DO UPDATE SET version=excluded.version').run(channel, slug, version); },
   withdrawRelease: (slug: string, channel: string) => db.prepare('DELETE FROM channel_releases WHERE channel=? AND skill_slug=?').run(channel, slug),
   listChannels: () => db.prepare('SELECT * FROM channel_releases ORDER BY channel,skill_slug').all(),
