@@ -11,10 +11,11 @@ import { metadata } from './release/runtime.js';
 import { packageRoot as releasePackageRoot } from './paths.js';
 import { home as upgradeHome, updateStatus } from './release/runtime.js';
 import { bodyLimit } from 'hono/body-limit';
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { config } from './config.js';
 import { persistArchive, assertSkillId, removeArchive } from './archive.js';
 import { authenticateOsUser, createSession, readAuth, removeSession, sessionCookie, validUsername } from './auth.js';
@@ -25,7 +26,7 @@ import { z } from 'zod';
 import { hiveXuiStubResponse } from './hivexui-stub.js';
 import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
-import { Release as BrowserRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
+import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -220,20 +221,74 @@ app.post('/v1/agent/receipts/:target', async (c) => {
   return c.json({ ok: true });
 });
 
-// Only the release currently promoted on the requested channel is downloadable;
-// unpromoted, superseded and withdrawn releases are reported as missing.
-app.get('/v1/skills/:slug/releases/:version/archive', (c) => {
+// Pinned-release readers: an enrolled target, with the same `?target=` and bearer token the agent
+// manifest and receipts use and limited to the target's skill allowlist, or a registry administrator
+// (session or linked Oathweave identity), who can already list every release. Never anonymous.
+const requirePinnedReader = async (c: Context<{ Variables: Variables }>, skillSlug: string): Promise<void> => {
+  const target = c.req.query('target');
+  if (target !== undefined) {
+    const policy = store.authenticateTarget(target, bearer(c.req.header('authorization')));
+    if (!policy) throw new HTTPException(401, { message: 'Target enrollment required' });
+    if (policy.skills && !policy.skills.includes(skillSlug)) throw new HTTPException(403, { message: 'This target is not assigned the skill' });
+    return;
+  }
+  await requireAuth(true)(c, async () => {});
+};
+
+// A release of an enabled skill by exact version, or 404. Releases are immutable and never revoked one by
+// one: disabling or deleting the skill is what takes its releases out of distribution.
+const pinnedRelease = (skillSlug: string, version: string): Release => {
+  const release = store.getSkill(skillSlug)?.enabled ? store.getRelease(skillSlug, version) : undefined;
+  if (!release) throw new HTTPException(404, { message: 'Release not found' });
+  return release;
+};
+
+// The stored archive bytes, served only when they still match the release digest.
+const archiveResponse = (c: Context<{ Variables: Variables }>, release: Release): Response => {
+  if (!existsSync(release.archivePath)) throw new HTTPException(404, { message: 'Release archive not found' });
+  const bytes = readFileSync(release.archivePath);
+  if (createHash('sha256').update(bytes).digest('hex') !== release.sha256) {
+    console.error(`archive digest mismatch: ${release.skillSlug}@${release.version}`);
+    return c.json({ error: 'Release archive failed its digest check' }, 500);
+  }
+  c.header('Content-Type', 'application/gzip');
+  c.header('Content-Disposition', `attachment; filename="${release.skillSlug}-${release.version}.tgz"`);
+  c.header('X-Content-SHA256', release.sha256);
+  return c.body(bytes);
+};
+
+// Metadata of one immutable release by exact version, promoted or not (skills.pinned-release.v1).
+app.get('/v1/skills/:slug/releases/:version', async (c) => {
+  const skillSlug = c.req.param('slug');
+  await requirePinnedReader(c, skillSlug);
+  const release = pinnedRelease(skillSlug, c.req.param('version'));
+  c.header('Cache-Control', 'no-store');
+  return c.json(PinnedRelease.parse({
+    slug: release.skillSlug,
+    version: release.version,
+    sha256: release.sha256,
+    size: existsSync(release.archivePath) ? statSync(release.archivePath).size : null,
+    notes: release.notes,
+    compatibility: { minHermesVersion: release.minHermesVersion ?? null, maxHermesVersion: release.maxHermesVersion ?? null },
+    channels: store.releaseChannels(release.skillSlug, release.version),
+    archiveUrl: `${config.publicUrl}/v1/skills/${release.skillSlug}/releases/${release.version}/archive`,
+    createdAt: release.createdAt,
+  }));
+});
+
+// The release promoted on the requested channel stays public, as before. Any other immutable release of
+// an enabled skill is served to a pinned-release reader (skills.pinned-release.v1); anonymous callers
+// still see unpromoted, superseded and withdrawn releases as missing.
+app.get('/v1/skills/:slug/releases/:version/archive', async (c) => {
   const skillSlug = c.req.param('slug');
   const version = c.req.param('version');
   const skill = store.getSkill(skillSlug);
   const promoted = store.channelRelease(channelParam(c.req.query('channel')), skillSlug);
-  if (!skill?.enabled || !promoted || promoted.version !== version || !existsSync(promoted.archivePath)) {
-    throw new HTTPException(404, { message: 'Release archive not found' });
-  }
-  c.header('Content-Type', 'application/gzip');
-  c.header('Content-Disposition', `attachment; filename="${skillSlug}-${version}.tgz"`);
-  c.header('X-Content-SHA256', promoted.sha256);
-  return c.body(readFileSync(promoted.archivePath));
+  if (skill?.enabled && promoted?.version === version) return archiveResponse(c, promoted);
+  const credentials = c.req.query('target') !== undefined || c.req.header('authorization') !== undefined || readAuth(c.req.header('cookie')) !== undefined;
+  if (!credentials) throw new HTTPException(404, { message: 'Release archive not found' });
+  await requirePinnedReader(c, skillSlug);
+  return archiveResponse(c, pinnedRelease(skillSlug, version));
 });
 
 app.post('/auth/login', async (c) => {

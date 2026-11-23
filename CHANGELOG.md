@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Pinned releases (`skills.pinned-release.v1`). `GET /v1/skills/:slug/releases/:version` returns one immutable release by exact version, promoted or not: `sha256`, archive `size`, `notes`, Hermes `compatibility`, the `channels` it is promoted on, `archiveUrl` and `createdAt`. `GET /v1/skills/:slug/releases/:version/archive` now also serves releases that are not promoted, with `X-Content-SHA256`. Both need an enrolled target (`?target=` with its bearer token, the manifest credential, and only for skills the target is assigned) or a registry administrator. Anonymous callers get `401` from the metadata route, and the archive route still answers `404` for anything but the release promoted on the requested channel, which stays public. Releases of a disabled skill are not served. OpenAPI and browser contracts add `PinnedRelease`. No storage change.
+
+### Changed
+
+- The archive route checks the stored bytes against the release digest before serving any archive, the promoted one included, and answers `500` without the bytes when they differ. Agents already verified the digest themselves; a corrupted archive is now refused at the registry too.
+
 ## [1.8.1] - 2026-11-15
 
 ### Changed

@@ -18,6 +18,19 @@ export const Release = z.object({
   maxHermesVersion: z.string().nullable().optional(),
   createdAt: z.string(),
 });
+// One immutable release by exact version (GET /v1/skills/:slug/releases/:version), promoted or not.
+// size is null when the stored archive is missing; channels lists where this version is promoted now.
+export const PinnedRelease = z.object({
+  slug: z.string(),
+  version: z.string(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  size: z.number().int().nonnegative().nullable(),
+  notes: z.string().nullable(),
+  compatibility: z.object({ minHermesVersion: z.string().nullable(), maxHermesVersion: z.string().nullable() }).strict(),
+  channels: z.array(z.enum(['stable', 'canary'])),
+  archiveUrl: z.string(),
+  createdAt: z.string(),
+}).strict();
 export const Channel = z.object({
   channel: z.enum(['stable', 'canary']),
   skill_slug: z.string(),
@@ -133,6 +146,6 @@ export const HiveAuditQuery = z.object({
   limit: z.coerce.number().int().min(1).optional(),
 });
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
-  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse,
+  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,PinnedRelease,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse,
   MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery,HiveAuditRecord,HiveAuditPage,HiveAuditQuery
 };

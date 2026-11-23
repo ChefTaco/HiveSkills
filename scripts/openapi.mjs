@@ -144,6 +144,46 @@ paths['/v1/audit/export'].get = {
     403: { description: 'hiveskills:audit:read or registry administrator access required' },
   },
 };
+// Pinned releases (capability skills.pinned-release.v1): any immutable release of an enabled skill by
+// exact version. Readers are enrolled targets (?target= plus the target bearer token, limited to the
+// target's skill allowlist) or registry administrators; the channel-promoted archive stays public.
+const pinnedParameters = [
+  { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+  { name: 'version', in: 'path', required: true, schema: { type: 'string' } },
+  { name: 'target', in: 'query', required: false, description: 'Enrolled target name; send its enrollment token as the bearer token', schema: { type: 'string' } },
+];
+paths['/v1/skills/{slug}/releases/{version}'].get = {
+  summary: 'Metadata of one immutable release by exact version, promoted or not',
+  description:
+    'Digest, archive size, Hermes compatibility and the channels this version is promoted on. Requires an enrolled target (assigned the skill) or a registry administrator.',
+  security: [{ targetToken: [] }, { resourceBearer: [] }, { nativeSession: [] }],
+  parameters: pinnedParameters,
+  responses: {
+    200: { description: 'The release', content: { 'application/json': { schema: { $ref: '#/components/schemas/PinnedRelease' } } } },
+    401: { description: 'Target enrollment or sign-in required' },
+    403: { description: 'Registry administrator access, or a target assigned this skill, required' },
+    404: { description: 'No such release of an enabled skill' },
+  },
+};
+paths['/v1/skills/{slug}/releases/{version}/archive'].get = {
+  summary: 'Skill release archive with its SHA-256 digest',
+  description:
+    'The release promoted on the requested channel (default stable) is public. Any other immutable release of an enabled skill needs an enrolled target (assigned the skill) or a registry administrator; anonymous callers get 404 for it. The stored bytes are checked against the release digest before they are served; X-Content-SHA256 carries that digest.',
+  security: [{}, { targetToken: [] }, { resourceBearer: [] }, { nativeSession: [] }],
+  parameters: [...pinnedParameters, { name: 'channel', in: 'query', required: false, description: 'stable (default) or canary; selects the public promoted release', schema: { type: 'string', enum: ['stable', 'canary'] } }],
+  responses: {
+    200: {
+      description: 'The archive bytes',
+      headers: { 'X-Content-SHA256': { description: 'SHA-256 of the archive, equal to the release digest', schema: { type: 'string', pattern: '^[a-f0-9]{64}$' } } },
+      content: { 'application/gzip': { schema: { type: 'string', format: 'binary' } } },
+    },
+    400: { description: 'Invalid channel' },
+    401: { description: 'Target enrollment or sign-in required' },
+    403: { description: 'Registry administrator access, or a target assigned this skill, required' },
+    404: { description: 'Not the promoted release (anonymous), or no such release or archive' },
+    500: { description: 'The stored archive no longer matches the release digest' },
+  },
+};
 // The standalone web UI is retired: / only points browsers to HiveXUI.
 paths['/'].get = {
   summary: 'Retired web UI: HiveXUI stub page or redirect',
@@ -181,6 +221,7 @@ const spec = {
         in: 'cookie',
         name: 'hive_skills_session',
       },
+      targetToken: { type: 'http', scheme: 'bearer', description: 'Target enrollment token, sent with ?target=<name>' },
     },
   },
 };
