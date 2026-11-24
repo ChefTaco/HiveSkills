@@ -9,6 +9,7 @@ import { decodePosition, feedSince, hiveEventPage, type FeedPosition } from './h
 import { maintenanceActive } from './release/runtime.js';
 import { metadata } from './release/runtime.js';
 import { packageRoot as releasePackageRoot } from './paths.js';
+import { SERVICE_CAPABILITIES } from './capabilities.js';
 import { home as upgradeHome, updateStatus } from './release/runtime.js';
 import { bodyLimit } from 'hono/body-limit';
 import { createHash } from 'node:crypto';
@@ -138,23 +139,24 @@ app.use('*', securityHeaders());
 
 // The standalone web UI is retired; HiveXUI is the UI.
 app.get('/', (c) => hiveXuiStubResponse(c, config.hivexuiUrl));
-app.get('/health/live', (c) => c.json({ ...metadata(releasePackageRoot), status: 'ok', service: 'hive-skills' }));
+app.get('/health/live', (c) => c.json({ ...metadata(releasePackageRoot), status: 'ok', service: 'hive-skills', capabilities: SERVICE_CAPABILITIES }));
 const health = createHealth({
   service: 'hive-skills',
   version: metadata(releasePackageRoot).version,
   checks: [{ name: 'database', check: () => { const { ready, missingArchives } = store.readiness(); return { ok: ready, details: { missingArchives } }; } }],
 });
 // Suite-standard readiness. /health/live and /healthz keep their historical bodies for existing probes.
+// Every health body also lists the service capabilities (src/capabilities.ts).
 app.get('/health/ready', async (c) => {
   const result = await health.ready();
-  return c.body(JSON.stringify(result.body), result.status, result.headers);
+  return c.body(JSON.stringify({ ...result.body, capabilities: SERVICE_CAPABILITIES }), result.status, result.headers);
 });
 app.get('/healthz', (c) => {
   try {
     const health = store.readiness();
-    return c.json({ ...metadata(releasePackageRoot), status: health.ready ? 'ok' : 'degraded', service: 'hive-skills', ...health }, health.ready ? 200 : 503);
+    return c.json({ ...metadata(releasePackageRoot), status: health.ready ? 'ok' : 'degraded', service: 'hive-skills', ...health, capabilities: SERVICE_CAPABILITIES }, health.ready ? 200 : 503);
   } catch {
-    return c.json({ status: 'degraded', service: 'hive-skills', reason: 'database_unavailable' }, 503);
+    return c.json({ status: 'degraded', service: 'hive-skills', reason: 'database_unavailable', capabilities: SERVICE_CAPABILITIES }, 503);
   }
 });
 
