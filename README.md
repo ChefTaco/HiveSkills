@@ -18,7 +18,7 @@ The registry is intentionally small and local-first. SQLite records skills, rele
 
 Since 1.3, HiveSkills ships only as a container image, `ghcr.io/cheftaco/hiveskills`, for
 `linux/amd64` and `linux/arm64`. Each release is tagged with its exact version (for example
-`1.9.0`; there is no `latest` tag), and its
+`1.9.1`; there is no `latest` tag), and its
 [GitHub release](https://github.com/ChefTaco/HiveSkills/releases) records the image digest.
 
 **With the Hive suite.** HiveSkills is normally installed by `hive.sh`, the
@@ -55,9 +55,9 @@ NODE_EXTRA_CA_CERTS=/config/tls/server.crt
 EOF
 
 docker run --rm -v hiveskills-data:/data -v "$PWD/tls:/config/tls:ro" \
-  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.9.0 check
+  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.9.1 check
 docker run -d --name hiveskills -p 127.0.0.1:4030:4030 -v hiveskills-data:/data \
-  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.9.0
+  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.9.1
 
 # Once it reports healthy
 curl --cacert tls/server.crt https://localhost:4030/healthz
@@ -179,7 +179,7 @@ registry installations do not synchronize Skills state.
 step with the code).
 
 - `GET /` – retired web UI: a static page pointing to HiveXUI, or a `302` to `HIVEXUI_URL` when set
-- `GET /healthz` – unauthenticated readiness (`GET /health/ready` returns the suite-standard body; `GET /health/live` is liveness)
+- `GET /healthz` – unauthenticated readiness (`GET /health/ready` returns the suite-standard body; `GET /health/live` is liveness). All three bodies list `capabilities`, the suite service capabilities this build provides (`skills.pinned-release.v1`)
 - `GET /v1/skills` / `GET /v1/skills/:slug` – public catalog
 - `GET /v1/agent/manifest` – Hermes pull manifest; `POST /v1/agent/receipts/:target` – the bridge's install receipt
 - `GET /v1/skills/:slug/releases/:version/archive[?channel=canary]` – archive payload with `X-Content-SHA256`; public only for the release currently promoted on that channel (default `stable`), any other release needs a pinned-release reader (see below)

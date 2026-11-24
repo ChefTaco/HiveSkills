@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.9.1] - 2026-11-24
+
+### Added
+
+- `GET /health/live`, `GET /health/ready` and `GET /healthz` report `capabilities: ["skills.pinned-release.v1"]`, so a Magnus without the Hive Registry can tell from the liveness probe that pinned releases are served. The capability list is one constant (`src/capabilities.ts`). Every existing field, status code and header is unchanged.
+
 ## [1.9.0] - 2026-11-24
 
 ### Added

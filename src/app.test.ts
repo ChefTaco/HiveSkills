@@ -152,6 +152,20 @@ test('health endpoints keep legacy bodies and add suite-standard readiness', asy
   assert.equal(readyBody.checks.database?.details?.missingArchives, legacyBody.missingArchives);
 });
 
+test('health endpoints report the service capabilities', async () => {
+  const { SERVICE_CAPABILITIES } = await import('./capabilities.js');
+  assert.ok(SERVICE_CAPABILITIES.includes('skills.pinned-release.v1'));
+  for (const path of ['/health/live', '/health/ready', '/healthz']) {
+    const body = await (await app.request(`https://registry.test${path}`)).json() as { capabilities?: unknown };
+    assert.deepEqual(body.capabilities, ['skills.pinned-release.v1'], path);
+  }
+  // Additive: the existing fields are still there.
+  const live = await (await app.request('https://registry.test/health/live')).json() as Record<string, unknown>;
+  assert.deepEqual(Object.keys(live).sort(), ['capabilities', 'protocol', 'release', 'service', 'status', 'version']);
+  const ready = await (await app.request('https://registry.test/health/ready')).json() as Record<string, unknown>;
+  assert.deepEqual(Object.keys(ready).sort(), ['capabilities', 'checks', 'service', 'status', 'time', 'version']);
+});
+
 test('requests carry an x-request-id without changing error bodies', async () => {
   const echoed = await app.request('https://registry.test/admin/skills', { headers: { 'x-request-id': 'fixture-request-1' } });
   assert.equal(echoed.status, 401);
