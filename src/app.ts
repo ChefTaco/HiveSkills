@@ -12,8 +12,9 @@ import { packageRoot as releasePackageRoot } from './paths.js';
 import { SERVICE_CAPABILITIES } from './capabilities.js';
 import { home as upgradeHome, updateStatus } from './release/runtime.js';
 import { bodyLimit } from 'hono/body-limit';
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { Context, MiddlewareHandler } from 'hono';
@@ -27,7 +28,8 @@ import { z } from 'zod';
 import { hiveXuiStubResponse } from './hivexui-stub.js';
 import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
-import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
+import { archiveDigest } from './archive-digest.js';
+import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -130,7 +132,32 @@ const archiveUrl = (skillSlug: string, release: Release, channel: string): strin
 // Echo or assign x-request-id (and W3C trace context) on every response, maintenance included.
 app.use('*', requestContext());
 app.use('*', async (c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();});
-app.use('*', bodyLimit({ maxSize: 70 * 1024 * 1024 }));
+// Request body limits. Only a release upload carries an archive; every other body, including the
+// unauthenticated sign-in, is small. The limit holds while the body streams, without a
+// Content-Length and against a wrong one.
+export const MAX_JSON_BODY_BYTES = 64 * 1024;
+/** 1000 receipt entries of the longest slug, version and digest fit with room to spare. */
+export const MAX_RECEIPT_BODY_BYTES = 256 * 1024;
+/** A 50 MiB archive in base64 plus the release fields. */
+export const MAX_UPLOAD_JSON_BYTES = 70 * 1024 * 1024;
+export const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
+const tooLarge = (c: Context) => c.json({ error: 'Request body is too large' }, 413);
+const limits = {
+  json: bodyLimit({ maxSize: MAX_JSON_BODY_BYTES, onError: tooLarge }),
+  receipt: bodyLimit({ maxSize: MAX_RECEIPT_BODY_BYTES, onError: tooLarge }),
+  uploadJson: bodyLimit({ maxSize: MAX_UPLOAD_JSON_BYTES, onError: tooLarge }),
+  uploadArchive: bodyLimit({ maxSize: MAX_ARCHIVE_BYTES, onError: tooLarge }),
+};
+const uploadRoute = /^\/admin\/skills\/[^/]+\/releases$/;
+const receiptRoute = /^\/v1\/agent\/receipts\/[^/]+$/;
+/** A raw release upload: `application/gzip` (or the older `application/x-gzip`), parameters allowed. */
+const isGzipUpload = (contentType: string | undefined): boolean =>
+  /^application\/(?:x-)?gzip\s*(?:;|$)/i.test(contentType ?? '');
+app.use('*', (c, next) => {
+  if (c.req.method === 'POST' && uploadRoute.test(c.req.path)) return (isGzipUpload(c.req.header('content-type')) ? limits.uploadArchive : limits.uploadJson)(c, next);
+  if (c.req.method === 'POST' && receiptRoute.test(c.req.path)) return limits.receipt(c, next);
+  return limits.json(c, next);
+});
 
 for (const target of config.targets) store.seedTarget(target);
 
@@ -139,11 +166,23 @@ app.use('*', securityHeaders());
 
 // The standalone web UI is retired; HiveXUI is the UI.
 app.get('/', (c) => hiveXuiStubResponse(c, config.hivexuiUrl));
-app.get('/health/live', (c) => c.json({ ...metadata(releasePackageRoot), status: 'ok', service: 'hive-skills', capabilities: SERVICE_CAPABILITIES }));
+const serviceMetadata = metadata(releasePackageRoot);
+app.get('/health/live', (c) => c.json({ ...serviceMetadata, status: 'ok', service: 'hive-skills', capabilities: SERVICE_CAPABILITIES }));
+// The readiness check stats every promoted archive. Unauthenticated probes share one run for a few
+// seconds instead of each repeating it; a failing database is never cached.
+export const READINESS_CACHE_MS = 5_000;
+let readinessRun: { at: number; value: { ready: boolean; missingArchives: number } } | undefined;
+const readiness = (): { ready: boolean; missingArchives: number } => {
+  const now = Date.now();
+  if (readinessRun && now - readinessRun.at >= 0 && now - readinessRun.at < READINESS_CACHE_MS) return readinessRun.value;
+  const value = store.readiness();
+  readinessRun = { at: now, value };
+  return value;
+};
 const health = createHealth({
   service: 'hive-skills',
-  version: metadata(releasePackageRoot).version,
-  checks: [{ name: 'database', check: () => { const { ready, missingArchives } = store.readiness(); return { ok: ready, details: { missingArchives } }; } }],
+  version: serviceMetadata.version,
+  checks: [{ name: 'database', check: () => { const { ready, missingArchives } = readiness(); return { ok: ready, details: { missingArchives } }; } }],
 });
 // Suite-standard readiness. /health/live and /healthz keep their historical bodies for existing probes.
 // Every health body also lists the service capabilities (src/capabilities.ts).
@@ -153,8 +192,8 @@ app.get('/health/ready', async (c) => {
 });
 app.get('/healthz', (c) => {
   try {
-    const health = store.readiness();
-    return c.json({ ...metadata(releasePackageRoot), status: health.ready ? 'ok' : 'degraded', service: 'hive-skills', ...health, capabilities: SERVICE_CAPABILITIES }, health.ready ? 200 : 503);
+    const health = readiness();
+    return c.json({ ...serviceMetadata, status: health.ready ? 'ok' : 'degraded', service: 'hive-skills', ...health, capabilities: SERVICE_CAPABILITIES }, health.ready ? 200 : 503);
   } catch {
     return c.json({ status: 'degraded', service: 'hive-skills', reason: 'database_unavailable', capabilities: SERVICE_CAPABILITIES }, 503);
   }
@@ -245,18 +284,30 @@ const pinnedRelease = (skillSlug: string, version: string): Release => {
   return release;
 };
 
-// The stored archive bytes, served only when they still match the release digest.
-const archiveResponse = (c: Context<{ Variables: Variables }>, release: Release): Response => {
-  if (!existsSync(release.archivePath)) throw new HTTPException(404, { message: 'Release archive not found' });
-  const bytes = readFileSync(release.archivePath);
-  if (createHash('sha256').update(bytes).digest('hex') !== release.sha256) {
-    console.error(`archive digest mismatch: ${release.skillSlug}@${release.version}`);
-    return c.json({ error: 'Release archive failed its digest check' }, 500);
+// The stored archive bytes, served only when they still match the release digest. The file is
+// opened once, checked and streamed from the same handle, so a file swapped in after the check is
+// never served. The digest is hashed in chunks without blocking other requests, and cached by
+// size, mtime and inode, so an unchanged archive is hashed once rather than on every download.
+const archiveResponse = async (c: Context<{ Variables: Variables }>, release: Release): Promise<Response> => {
+  let handle;
+  try { handle = await open(release.archivePath, 'r'); } catch { throw new HTTPException(404, { message: 'Release archive not found' }); }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new HTTPException(404, { message: 'Release archive not found' });
+    if (await archiveDigest(release.archivePath, handle, stat) !== release.sha256) {
+      console.error(`archive digest mismatch: ${release.skillSlug}@${release.version}`);
+      return c.json({ error: 'Release archive failed its digest check' }, 500);
+    }
+    c.header('Content-Type', 'application/gzip');
+    c.header('Content-Length', String(stat.size));
+    c.header('Content-Disposition', `attachment; filename="${release.skillSlug}-${release.version}.tgz"`);
+    c.header('X-Content-SHA256', release.sha256);
+    const body = Readable.toWeb(handle.createReadStream({ start: 0, end: Math.max(stat.size - 1, 0) })) as ReadableStream<Uint8Array>;
+    handle = undefined; // The stream owns and closes the handle.
+    return c.body(body);
+  } finally {
+    await handle?.close();
   }
-  c.header('Content-Type', 'application/gzip');
-  c.header('Content-Disposition', `attachment; filename="${release.skillSlug}-${release.version}.tgz"`);
-  c.header('X-Content-SHA256', release.sha256);
-  return c.body(bytes);
 };
 
 // Metadata of one immutable release by exact version, promoted or not (skills.pinned-release.v1).
@@ -366,10 +417,23 @@ app.delete('/admin/skills/:slug', requireAuth(true), (c) => {
   return c.body(null, 204);
 });
 
+// A release upload is either JSON with `archiveBase64`, or the raw archive bytes as
+// `application/gzip` with the release fields in the query string, which avoids holding a base64
+// string of the archive in memory.
 app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   const skillId = c.req.param('slug');
   if (!store.getSkill(skillId)) throw new HTTPException(404, { message: 'Skill not found' });
-  const body = browserInput(UploadRelease, await requestJson(c));
+  let body: { version: string; notes?: string | null | undefined; minHermesVersion?: string | null | undefined; maxHermesVersion?: string | null | undefined };
+  let archiveBytes: () => Promise<Buffer>;
+  if (isGzipUpload(c.req.header('content-type'))) {
+    const query = new URL(c.req.url).searchParams;
+    body = browserInput(UploadArchiveQuery, Object.fromEntries([...query.keys()].map((key) => [key, query.getAll(key).length === 1 ? query.get(key) : query.getAll(key)])));
+    archiveBytes = async () => Buffer.from(await c.req.arrayBuffer());
+  } else {
+    const json = browserInput(UploadRelease, await requestJson(c));
+    body = json;
+    archiveBytes = async () => Buffer.from(text(json.archiveBase64, 'archiveBase64', MAX_UPLOAD_JSON_BYTES), 'base64');
+  }
   const version = text(body.version, 'version', 64);
   try {
     assertSkillId(skillId, version);
@@ -388,10 +452,10 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   } catch (error) {
     throw new HTTPException(400, { message: error instanceof Error ? error.message : 'Invalid compatibility range' });
   }
-  const archive = text(body.archiveBase64, 'archiveBase64', 70 * 1024 * 1024);
+  const archive = await archiveBytes();
   let persisted: { path: string; sha256: string };
   try {
-    persisted = persistArchive(skillId, version, Buffer.from(archive, 'base64'));
+    persisted = persistArchive(skillId, version, archive);
   } catch (error) {
     throw new HTTPException(400, { message: error instanceof Error ? error.message : 'Invalid archive' });
   }

@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `POST /admin/skills/:slug/releases` also accepts the raw archive as `Content-Type: application/gzip` (or `application/x-gzip`), with `version`, `notes`, `minHermesVersion` and `maxHermesVersion` in the query string, so a 50 MiB archive is no longer sent as a 70 MB base64 JSON string. The JSON form is unchanged. Browser contracts add `UploadArchiveQuery`.
+
+### Changed
+
+- Request body limits are per route. Only a release upload may be large (70 MiB as JSON, 50 MiB as a raw archive); an agent receipt may be 256 KiB and every other body, the unauthenticated `POST /auth/login` included, 64 KiB. Previously every route accepted 70 MiB, so an anonymous caller could make the server buffer and parse a 70 MB JSON body. Over-limit bodies are answered with `413` and `{"error":"Request body is too large"}` (previously a plain-text `413`).
+- Archive downloads are streamed from the file instead of read into memory, with `Content-Length`. The digest check still runs before any byte is sent, but it is hashed in chunks without blocking other requests and cached by file size, mtime and inode, so an unchanged archive is hashed once rather than on every download.
+- `GET /health/ready` and `GET /healthz` share one readiness run (which checks every promoted archive) for 5 seconds instead of repeating it on every probe. A database failure is never cached.
+
+### Upgrade notes
+
+- A client that sends a JSON body over 64 KiB to a route other than a release upload or a receipt now gets `413`. No HiveSkills route needs one.
+
 ## [1.9.1] - 2026-11-24
 
 ### Added

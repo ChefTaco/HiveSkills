@@ -95,6 +95,8 @@ export const UploadRelease = z.object({
   minHermesVersion: optionalText(64),
   maxHermesVersion: optionalText(64),
 });
+// A raw `application/gzip` release upload carries these fields in its query string.
+export const UploadArchiveQuery = UploadRelease.omit({ archiveBase64: true }).strict();
 export const EnrollTarget = z.object({
   channel: z.enum(['stable', 'canary']),
   skills: z.array(requiredText(63).toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,62}$/)).optional(),
@@ -146,6 +148,6 @@ export const HiveAuditQuery = z.object({
   limit: z.coerce.number().int().min(1).optional(),
 });
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
-  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,PinnedRelease,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,EnrollTarget,EmptyResponse,
+  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,PinnedRelease,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,UploadArchiveQuery,EnrollTarget,EmptyResponse,
   MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery,HiveAuditRecord,HiveAuditPage,HiveAuditQuery
 };
