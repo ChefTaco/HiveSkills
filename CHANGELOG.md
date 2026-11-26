@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `HIVE_SKILLS_UNSIGNED_INSTALLED` for the Hermes bridge. With `HIVE_SKILLS_PUBLISHER_KEYS` pinned, the bridge now also checks the releases of skills installed before the keys were pinned (once per release and key, remembered in its state file). An unsigned one is reported on stderr and stays active (`report`, the default), or with `quarantine` is moved out of the gateway's skills directory to `~/.hermes/.hive-skills-sync/<slug>.quarantined`, the gateway is restarted and the sync fails; from then on it is refused like any unsigned release until it is signed. **Upgrade:** redeploy the bridge; hosts that pin keys make one metadata request per installed skill on the first sync after the upgrade and log any unsigned installed skill on every sync until it is signed or quarantined.
+
 ### Changed
 
 - `HIVE_SKILLS_TRUSTED_PROXIES` also accepts CIDR ranges (`10.0.0.0/8`) and the presets `loopback`, `private` and `linklocal`, comma- or space-separated. Existing lists of exact addresses work unchanged.
@@ -10,6 +14,7 @@
 ### Fixed
 
 - Automatic canary rollback (`HIVE_SKILLS_CANARY_AUTO_ROLLBACK=true`) now works with the shipped Hermes bridge and is scoped to what changed. The bridge used to throw on a failed gateway restart without telling the registry, so rollback never fired; it now posts a `restart_failed` receipt before exiting with the error. It also checks a running gateway is still active (and was not restarted again by systemd) after a settle delay before it reports `activated` (`HIVE_SKILLS_RESTART_SETTLE_MS`, default 10000), so promotion counts healthy gateways rather than accepted restart jobs. Receipts gain an optional `changed` list (the skills installed since the gateway last restarted cleanly, kept across runs while a restart is pending) and rollback acts only on the canary skills named there; previously every canary skill in the receipt was rolled back, including long-healthy ones. **Upgrade:** redeploy the bridge to agent hosts (`scripts/deploy-hermes-agent.sh`) to get the receipts; a sync that restarts a running gateway now takes about 10 seconds longer. A custom agent that sends `restart_failed` without `changed` no longer triggers a rollback.
+- A release upload with a signature stores the release and its signature in one transaction, so a failure between the two can no longer leave an unsigned release behind.
 
 ### Security
 

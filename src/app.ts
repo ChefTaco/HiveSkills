@@ -530,8 +530,7 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
     createdAt: new Date().toISOString(),
   };
   try {
-    store.addRelease(release);
-    if (signature) store.setReleaseSignature(skillId, version, signature);
+    store.addRelease(release, signature);
   } catch (error) {
     removeArchive(persisted.path);
     throw error;

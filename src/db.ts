@@ -54,7 +54,15 @@ export const store = {
     db.prepare('UPDATE skills SET name=?, description=?, homepage=?, enabled=?, updated_at=? WHERE slug=?').run(patch.name ?? current.name, patch.description ?? current.description, patch.homepage === undefined ? current.homepage : patch.homepage, Number(patch.enabled ?? current.enabled), now(), slug); return store.getSkill(slug);
   },
   deleteSkill: (slug: string): boolean => db.prepare('DELETE FROM skills WHERE slug = ?').run(slug).changes === 1,
-  addRelease: (release: Release): void => { db.prepare('INSERT INTO releases(skill_slug,version,sha256,archive_path,notes,created_at,min_hermes_version,max_hermes_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(release.skillSlug, release.version, release.sha256, release.archivePath, release.notes, release.createdAt, release.minHermesVersion ?? null, release.maxHermesVersion ?? null); },
+  /** Insert a release and, when given, its verified publisher signature, in one transaction. */
+  addRelease: (release: Release, signature?: ReleaseSignature | null): void => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('INSERT INTO releases(skill_slug,version,sha256,archive_path,notes,created_at,min_hermes_version,max_hermes_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(release.skillSlug, release.version, release.sha256, release.archivePath, release.notes, release.createdAt, release.minHermesVersion ?? null, release.maxHermesVersion ?? null);
+      if (signature) store.setReleaseSignature(release.skillSlug, release.version, signature);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  },
   getRelease: (slug: string, version: string): Release | undefined => { const row = db.prepare('SELECT * FROM releases WHERE skill_slug=? AND version=?').get(slug, version) as ReleaseRow | undefined; return row && mapRelease(row); },
   channelRelease: (channel: string, slug: string): Release | undefined => {
     const pin = db.prepare('SELECT version FROM channel_releases WHERE channel=? AND skill_slug=?').get(channel, slug) as { version: string } | undefined;

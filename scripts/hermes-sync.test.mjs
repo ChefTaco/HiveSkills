@@ -238,3 +238,50 @@ test('the gateway restart checks a running gateway stays up', async () => {
   // try-restart itself failing.
   await assert.rejects(restartGateway({ run: (command, args) => ({ status: args[1] === 'try-restart' ? 1 : 0 }) }), /restart failed/);
 });
+test('skills installed before publisher keys were pinned are checked, reported or quarantined', async () => {
+  const f = fixture();
+  try {
+    const bytes = f.pack();
+    const key = join(f.root, 'publisher.pem');
+    const publisherKeys = parsePublisherKeys(JSON.stringify([keygen({ out: key, keyId: 'example' })]));
+    const entry = (slug) => ({ slug, version: '1.0.0', sha256: createHash('sha256').update(bytes).digest('hex'), archiveUrl: `https://registry.test/v1/skills/${slug}/releases/1.0.0/archive` });
+    const signatures = { signed: { keyId: 'example', value: signRelease({ key, keyId: 'example', slug: 'signed', version: '1.0.0', sha256: entry('signed').sha256 }).signature }, legacy: null };
+    const metadataReads = [];
+    const fetchImpl = async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/manifest')) return Response.json({ schemaVersion: 1, skills: [entry('signed'), entry('legacy')] });
+      const metadata = /^\/v1\/skills\/([a-z-]+)\/releases\/1\.0\.0$/.exec(path);
+      if (metadata) { metadataReads.push(metadata[1]); return Response.json({ slug: metadata[1], version: '1.0.0', sha256: entry(metadata[1]).sha256, signature: signatures[metadata[1]] }); }
+      if (path.startsWith('/v1/agent/receipts/')) return Response.json({ ok: true });
+      return new Response(bytes);
+    };
+    let restarts = 0;
+    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, target: 'agent-1', token: 'tok', restart: () => { restarts++; } };
+    // Both installed while no key was pinned.
+    await syncSkills(options);
+    assert.equal(restarts, 1);
+    // Keys pinned, default: the unsigned installed skill is reported and stays active.
+    const warnings = []; const warn = console.warn; console.warn = (message) => warnings.push(message);
+    try { await syncSkills({ ...options, publisherKeys }); } finally { console.warn = warn; }
+    assert.match(warnings.join('\n'), /legacy 1\.0\.0/);
+    assert.doesNotMatch(warnings.join('\n'), /signed 1\.0\.0/);
+    assert.ok(existsSync(join(options.hermesHome, 'skills/registry/legacy/SKILL.md')));
+    // A verified signature is remembered: the next run reads only the unverified skill's metadata.
+    metadataReads.length = 0;
+    console.warn = () => {};
+    try { await syncSkills({ ...options, publisherKeys }); } finally { console.warn = warn; }
+    assert.deepEqual(metadataReads, ['legacy']);
+    // Quarantine: the unsigned skill leaves the gateway's directory, the gateway restarts and the sync fails.
+    await assert.rejects(syncSkills({ ...options, publisherKeys, unsignedInstalled: 'quarantine' }), /Quarantined installed skills .*legacy 1\.0\.0/);
+    assert.equal(existsSync(join(options.hermesHome, 'skills/registry/legacy')), false);
+    assert.ok(existsSync(join(options.hermesHome, '.hive-skills-sync/legacy.quarantined/SKILL.md')));
+    assert.ok(existsSync(join(options.hermesHome, 'skills/registry/signed/SKILL.md')));
+    assert.equal(restarts, 2);
+    // From then on it is treated like any unsigned release: the sync is refused until it is signed.
+    await assert.rejects(syncSkills({ ...options, publisherKeys }), /legacy 1\.0\.0 has no valid signature/);
+    signatures.legacy = { keyId: 'example', value: signRelease({ key, keyId: 'example', slug: 'legacy', version: '1.0.0', sha256: entry('legacy').sha256 }).signature };
+    await syncSkills({ ...options, publisherKeys });
+    assert.ok(existsSync(join(options.hermesHome, 'skills/registry/legacy/SKILL.md')));
+    await assert.rejects(syncSkills({ ...options, unsignedInstalled: 'delete' }), /report or quarantine/);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
