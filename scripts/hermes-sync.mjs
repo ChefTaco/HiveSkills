@@ -45,7 +45,8 @@ export async function restartGateway({ run = spawnSync, sleep = (ms) => new Prom
   if (before !== null && afterwards !== null && afterwards > before) throw new Error('Hermes gateway restarted again after the restart');
 }
 
-export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => restartGateway() }) {
+export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), unsignedInstalled = 'report', hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => restartGateway() }) {
+  if (unsignedInstalled !== 'report' && unsignedInstalled !== 'quarantine') throw new Error('HIVE_SKILLS_UNSIGNED_INSTALLED must be report or quarantine');
   const origin = new URL(registry);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) throw new Error('Registry requires a plain HTTPS URL');
   // A frozen approval never bypasses native target revocation or a changed
@@ -113,20 +114,45 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     const needsInstall = (skill) => !(prior.skills?.[skill.slug]?.sha256 === skill.sha256 && existsSync(resolve(root, skill.slug, 'SKILL.md')));
     // With pinned publisher keys, every release about to be installed must carry a valid signature
     // from one of them. All are checked before anything is activated, so a registry or an
-    // administrator session cannot push code the publisher did not sign.
+    // administrator session cannot push code the publisher did not sign. Skills installed before the
+    // keys were pinned are checked too (once per release and key, remembered in the state): an
+    // unsigned one is reported, or with HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine moved out of the
+    // gateway's skills directory, so unsigned code stops running.
+    const verifiedSignatures = {};
     if (publisherKeys.size) {
       if (!target || !token) throw new Error('Pinned publisher keys need an enrolled target to read release signatures');
-      for (const skill of manifest.skills.filter(needsInstall)) {
+      const keyStamp = (keyId) => { const key = publisherKeys.get(keyId); return key ? `${keyId}:${key.export({ format: 'jwk' }).x}` : undefined; };
+      const refused = []; const unsigned = [];
+      for (const skill of manifest.skills) {
+        const install = needsInstall(skill);
+        const remembered = prior.verifiedSignatures?.[skill.slug];
+        if (!install && remembered && remembered.sha256 === skill.sha256 && remembered.key === keyStamp(remembered.keyId)) { verifiedSignatures[skill.slug] = remembered; continue; }
         const url = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}`);
         url.searchParams.set('target', target);
         const metadata = JSON.parse((await boundedResponse(await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 64 * 1024)).toString('utf8'));
         if (metadata.slug !== skill.slug || metadata.version !== skill.version || metadata.sha256 !== skill.sha256) throw new Error(`Release metadata for ${skill.slug} differs from the manifest`);
-        if (!verifyReleaseSignature(publisherKeys, skill, metadata.signature)) throw new Error(`Skill ${skill.slug} ${skill.version} has no valid signature from a pinned publisher key`);
+        if (verifyReleaseSignature(publisherKeys, skill, metadata.signature)) verifiedSignatures[skill.slug] = { sha256: skill.sha256, keyId: metadata.signature.keyId, key: keyStamp(metadata.signature.keyId) };
+        else (install ? refused : unsigned).push(`${skill.slug} ${skill.version}`);
       }
+      if (unsigned.length && unsignedInstalled === 'quarantine') {
+        for (const entry of unsigned) {
+          const slug = entry.split(' ')[0];
+          const quarantine = resolve(control, slug + '.quarantined');
+          rmSync(quarantine, { recursive: true, force: true });
+          if (existsSync(resolve(root, slug))) renameSync(resolve(root, slug), quarantine);
+          delete prior.skills[slug];
+        }
+        atomicJson(statePath, { ...prior, restartPending: true });
+        await restart();
+        atomicJson(statePath, { ...prior, restartPending: false });
+        throw new Error(`Quarantined installed skills without a valid signature from a pinned publisher key: ${unsigned.join(', ')}`);
+      }
+      if (unsigned.length) console.warn(`Installed skills without a valid signature from a pinned publisher key stay active (set HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine to remove them): ${unsigned.join(', ')}`);
+      if (refused.length) throw new Error(`Skill ${refused.join(', ')} has no valid signature from a pinned publisher key`);
     }
     // `pendingChanges` lists the skills installed since the gateway last restarted cleanly, carried
     // across runs while a restart is pending, so a failed restart is attributed to them only.
-    const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true, pendingChanges: prior.restartPending === true && Array.isArray(prior.pendingChanges) ? prior.pendingChanges.filter(safeSlug) : [] };
+    const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true, pendingChanges: prior.restartPending === true && Array.isArray(prior.pendingChanges) ? prior.pendingChanges.filter(safeSlug) : [], ...(publisherKeys.size ? { verifiedSignatures } : {}) };
     let changed = false;
     for (const skill of manifest.skills) {
       const destination = resolve(root, skill.slug);
@@ -188,5 +214,5 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined, publisherKeys: parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS) });
+  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined, publisherKeys: parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS), unsignedInstalled: process.env.HIVE_SKILLS_UNSIGNED_INSTALLED || 'report' });
 }

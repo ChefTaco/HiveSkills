@@ -317,6 +317,15 @@ This needs an enrolled target (`HIVE_SKILLS_TARGET` and its token) and applies t
 publications too. The bundled HiveMem seed is unsigned: sign it, or any other existing release,
 before pinning keys on hosts that install it.
 
+Pinning keys does not by itself remove skills a host installed before: the bridge also checks every
+installed skill's release (once per release and key; the result is kept in its state file) and, by
+default, only reports an unsigned one on stderr (the sync journal) while it stays active. Set
+`HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine` in the bridge environment to move such skills out of
+the gateway's skills directory (to `~/.hermes/.hive-skills-sync/<slug>.quarantined`), restart the
+gateway and fail the sync; from then on they are refused like any unsigned release until the
+release is signed. On the registry, `HIVE_SKILLS_REQUIRE_SIGNED_RELEASES=true` refuses new unsigned
+uploads but leaves existing releases and their channels as they are.
+
 ### Event feed
 
 `GET /v1/hive/events?after=<cursor>&limit=<n>` serves HiveEvent v1 events for the

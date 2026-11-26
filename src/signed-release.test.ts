@@ -112,3 +112,16 @@ test('an existing release can be signed later without changing it', async () => 
   assert.deepEqual([audit?.action, audit?.subject], ['release.sign', 'signed-example@0.9.0']);
   assert.equal((await app.request('https://skills.example.com/admin/skills/signed-example/releases/9.9.9/signature', { method: 'PUT', headers: { ...admin, 'content-type': 'application/json' }, body: JSON.stringify({ keyId: 'example-2026', value: right.signature }) })).status, 404);
 });
+
+test('a release and its signature are stored together or not at all', () => {
+  store.createSkill({ slug: 'atomic-example', name: 'Atomic example', description: 'Synthetic fixture', homepage: null, enabled: true });
+  const release = { skillSlug: 'atomic-example', version: '1.0.0', sha256: 'a'.repeat(64), archivePath: join(temporary, 'atomic.tgz'), notes: null, createdAt: new Date().toISOString() };
+  // A signature row that cannot be written (key_id is NOT NULL) leaves no unsigned release behind.
+  assert.throws(() => store.addRelease(release, { keyId: null as unknown as string, value: 'x' }));
+  assert.equal(store.getRelease('atomic-example', '1.0.0'), undefined);
+  store.addRelease(release, { keyId: 'example-2026', value: 'stored' });
+  assert.deepEqual(store.releaseSignature('atomic-example', '1.0.0'), { keyId: 'example-2026', value: 'stored' });
+  // A duplicate release fails before its signature replaces the stored one.
+  assert.throws(() => store.addRelease(release, { keyId: 'other-2026', value: 'replaced' }));
+  assert.deepEqual(store.releaseSignature('atomic-example', '1.0.0'), { keyId: 'example-2026', value: 'stored' });
+});
