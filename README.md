@@ -186,7 +186,9 @@ step with the code).
 - `GET /v1/skills/:slug/releases/:version` – metadata of one release by exact version for a pinned-release reader
 - `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` – PAM-backed OS sign-in and the current session
 - `GET /admin/skills`, `POST /admin/skills`, `PATCH /admin/skills/:slug`, `DELETE /admin/skills/:slug`
-- `GET /admin/skills/:slug/releases`, `POST /admin/skills/:slug/releases`
+- `GET /admin/skills/:slug/releases`, `POST /admin/skills/:slug/releases` – a release upload is JSON
+  with `archiveBase64`, or the raw archive as `Content-Type: application/gzip` with `version`,
+  `notes`, `minHermesVersion` and `maxHermesVersion` in the query string
 - `GET /admin/channels`, `PUT /admin/channels/:channel/:slug` (promote), `DELETE /admin/channels/:channel/:slug` (withdraw)
 - `GET /admin/targets`, `PUT /admin/targets/:name`, `POST /admin/targets/:name/enroll`, `GET /admin/receipts`
 - `GET /admin/deployments`, `GET /admin/deployments/capabilities`, `POST /admin/deployments/:target`,
@@ -195,6 +197,10 @@ step with the code).
 - `GET /v1/hive/events` and `GET /v1/audit/export` – see below
 
 Every write and deployment action is audit logged with the authenticated OS username.
+
+Request bodies are limited while they stream: 70 MiB for a JSON release upload, 50 MiB for a raw
+`application/gzip` one, 256 KiB for an agent receipt and 64 KiB for everything else, the sign-in
+included. A larger body is answered with `413`.
 
 Skills is optional; each registry installation is independent.
 
