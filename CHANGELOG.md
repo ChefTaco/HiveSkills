@@ -8,6 +8,7 @@
 - Failed sign-ins are audited. A PAM failure, and the first refusal of each throttle delay or window, writes a `login.failed` audit row (the attempted account, client address and throttle state; never the password), exported to Cindertrace as `session.login_failed` with `outcome: "failure"`. Names no OS account can have are still answered `401` without an audit row.
 - A per-source sign-in throttle: one client address may fail at most 10 times in 5 minutes across every account, then gets `429`. The per-account 15-second delay is unchanged. `429` answers now carry `Retry-After`. Optional `HIVE_SKILLS_TRUSTED_PROXIES` lists reverse-proxy IPs whose `X-Forwarded-For` names the client.
 - The legacy SSH deployment worker audits each job's outcome (`deployment.finished`, exported as `deployment.complete` with a success or failure outcome), so the export no longer shows a `deployment.queue` with no result.
+- `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` accepts `oathweave: { tokenUrl, clientId, clientSecretFile, audience, scope? }` in place of `credentialFile`. HiveSkills then authenticates to the Magnus executor with short-lived, audience-bound Oathweave `client_credentials` tokens (HiveCommon `createServiceTokenProvider()`, cached and refreshed before expiry) instead of a long-lived bearer read from disk on every call, and after a `401` fetches a fresh token and retries once. Exactly one of the two must be configured; `credentialFile` works as before. The executor must accept Oathweave service tokens for the configured audience.
 
 ### Security
 
@@ -26,6 +27,8 @@
 
 - Every error answer uses the suite envelope from `@hivemagnus/hive-common`: `{"error":{"code","message","requestId"}}` with `Cache-Control: no-store`, instead of `{"error":"text"}` (and `{"error":"DEPLOYMENT_ADAPTER_UNAVAILABLE","message":...}` for the missing Magnus adapter). Status codes and messages are unchanged. Codes are the suite defaults for the status (`bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `too_large`, `rate_limited`, `unavailable`, `internal`) plus `deployment_adapter_unavailable`, `maintenance` and `archive_digest_mismatch`; `requestId` matches the `x-request-id` header.
 - The deployment approval, reconcile and dispatch code (`src/app.ts`, `src/magnus-deployment.ts`, `src/deployment-journal.ts`) is reformatted from single long lines into reviewable statements. Behaviour is unchanged.
+
+- A Magnus deployment whose executor credential cannot be read (or whose Oathweave token cannot be fetched) is marked `failed` ("nothing was dispatched") instead of `unknown`, since no request was sent and there is nothing to reconcile.
 
 ### Fixed
 
