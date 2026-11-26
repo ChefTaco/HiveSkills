@@ -33,6 +33,7 @@ import { archiveDigest } from './archive-digest.js';
 import { verifyReleaseSignature } from '../scripts/archive-utils.mjs';
 import type { ReleaseSignature } from './types.js';
 import { LoginThrottle, clientAddress } from './login-throttle.js';
+import { applyRolloutPolicy } from './rollout.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, SetReleaseAdvisory, SetReleaseSignature, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
@@ -278,6 +279,10 @@ app.post('/v1/agent/receipts/:target', async (c) => {
     clean[slug(key)] = { version: text(item.version, 'version', 64), sha256: text(item.sha256, 'sha256', 64) };
   }
   store.recordReceipt(target, { status, skills: clean, receivedAt: new Date().toISOString(), attestation: 'agent-reported' });
+  // Opt-in canary promotion and rollback; a failure here never loses the stored receipt.
+  if (config.rollout.promoteAfter !== null || config.rollout.autoRollback) {
+    try { applyRolloutPolicy(config.rollout, target, { status, skills: clean }); } catch (error) { console.error('rollout policy failed', error); }
+  }
   return c.json({ ok: true });
 });
 

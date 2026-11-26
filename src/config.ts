@@ -6,6 +6,7 @@ import { bundledDeployScript } from './paths.js';
 import { parseHiveXuiUrl } from './hivexui-stub.js';
 import { parseTrustedProxies } from './login-throttle.js';
 import { parsePublisherKeys } from '../scripts/archive-utils.mjs';
+import { parseRolloutPolicyEnv } from './rollout-policy.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -77,6 +78,8 @@ export const config = {
   publisherKeys,
   /** Refuse release uploads without a valid publisher signature. */
   requireSignedReleases,
+  /** Opt-in canary promotion and rollback (src/rollout.ts). */
+  rollout: parseRolloutPolicyEnv(process.env),
 } as const;
 
 export const requireProductionSecrets = (): void => {

@@ -260,6 +260,21 @@ Linked targets list these fields; unlinked targets are listed exactly as before.
 that node, and `GET /admin/receipts?targetId=<name>` returns only that target's
 receipts. Without the parameters both listings are unchanged.
 
+### Automatic canary promotion and rollback
+
+Both rules are off by default and act only on the canary channel's current release, judged by the
+receipts canary targets send:
+
+- `HIVE_SKILLS_CANARY_PROMOTE_AFTER=N` promotes the canary release to stable once `N` distinct
+  canary targets report it (exact version and digest) `activated`. A release with an advisory is
+  never promoted automatically.
+- `HIVE_SKILLS_CANARY_AUTO_ROLLBACK=true` puts canary back on the stable release when a canary
+  target reports `restart_failed` with the canary release installed, or withdraws canary when
+  stable has no release of that skill.
+
+Each change is audited with the actor `system` and appears in the event feed as
+`skill.release.promoted` or `skill.release.withdrawn`, saying it was automatic.
+
 ### Publisher-signed releases
 
 A digest in the manifest proves only that an archive is what the registry serves. To make agent
