@@ -12,7 +12,7 @@ if (!existsSync(config.databasePath)) throw new Error('Skills database is missin
 const db = new DatabaseSync(config.databasePath, { enableForeignKeyConstraints: true });
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 /** The format of every session id this registry has issued: `randomBytes(32).toString('base64url')`. */
-const LEGACY_SESSION_ID = /^[A-Za-z0-9_-]{43}$/;
+const ISSUED_SESSION_ID = /^[A-Za-z0-9_-]{43}$/;
 
 type SkillRow = { slug: string; name: string; description: string; homepage: string | null; enabled: number; created_at: string; updated_at: string };
 type ReleaseRow = { skill_slug: string; version: string; sha256: string; archive_path: string; notes: string | null; min_hermes_version: string | null; max_hermes_version: string | null; created_at: string };
@@ -122,7 +122,7 @@ export const store = {
     let row = db.prepare('SELECT id, username, expires_at FROM sessions WHERE id=?').get(key) as SessionRow | undefined;
     // A session created before ids were hashed is re-keyed on first use, so it stays signed in. Only
     // an id in the issued format (32 random bytes, base64url) can be one, never a stored 64-hex hash.
-    if (!row && LEGACY_SESSION_ID.test(id)) {
+    if (!row && ISSUED_SESSION_ID.test(id)) {
       row = db.prepare('UPDATE sessions SET id=? WHERE id=? RETURNING id, username, expires_at').get(key, id) as SessionRow | undefined;
     }
     return row && { id: row.id, username: row.username, expiresAt: row.expires_at };
