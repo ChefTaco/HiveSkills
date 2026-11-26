@@ -166,11 +166,11 @@ test('health endpoints report the service capabilities', async () => {
   assert.deepEqual(Object.keys(ready).sort(), ['capabilities', 'checks', 'service', 'status', 'time', 'version']);
 });
 
-test('requests carry an x-request-id without changing error bodies', async () => {
+test('requests carry an x-request-id, and error bodies quote it', async () => {
   const echoed = await app.request('https://registry.test/admin/skills', { headers: { 'x-request-id': 'fixture-request-1' } });
   assert.equal(echoed.status, 401);
   assert.equal(echoed.headers.get('x-request-id'), 'fixture-request-1');
-  assert.deepEqual(await echoed.json(), { error: 'Sign in is required' });
+  assert.deepEqual(await echoed.json(), { error: { code: 'unauthorized', message: 'Sign in is required', requestId: 'fixture-request-1' } });
   const correlated = await app.request('https://registry.test/healthz', { headers: { 'x-correlation-id': 'fixture-correlation-1' } });
   assert.equal(correlated.headers.get('x-request-id'), 'fixture-correlation-1');
   const generated = await app.request('https://registry.test/health/live');
@@ -183,7 +183,9 @@ test('a body that is not JSON is a client error', async () => {
   const post = (path: string, method = 'POST') => app.request(`https://registry.test${path}`, { method, headers: { cookie, 'content-type': 'application/json' }, body: '{"slug":' });
   for (const response of [await post('/auth/login'), await post('/admin/skills'), await post('/admin/targets/agent-1', 'PUT')]) {
     assert.equal(response.status, 400);
-    assert.deepEqual(await response.json(), { error: 'Invalid JSON body' });
+    const body = await response.json() as { error: { code: string; message: string; requestId: string } };
+    assert.deepEqual([body.error.code, body.error.message], ['bad_request', 'Invalid JSON body']);
+    assert.equal(body.error.requestId, response.headers.get('x-request-id'));
   }
 });
 

@@ -24,6 +24,9 @@
 - CI runs the gates on Node 24.22.3 and 26.13.1 (the image's runtime), builds the image and opens a database with the image's Node, and every third-party Action in CI and the release workflow is pinned by commit SHA.
 - The two Node-version-dependent script tests no longer fail with assertion noise on an unsupported local Node: one passes the tested Node version explicitly, the other is skipped with a message naming the local version and the required range.
 
+- Every error answer uses the suite envelope from `@hivemagnus/hive-common`: `{"error":{"code","message","requestId"}}` with `Cache-Control: no-store`, instead of `{"error":"text"}` (and `{"error":"DEPLOYMENT_ADAPTER_UNAVAILABLE","message":...}` for the missing Magnus adapter). Status codes and messages are unchanged. Codes are the suite defaults for the status (`bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `too_large`, `rate_limited`, `unavailable`, `internal`) plus `deployment_adapter_unavailable`, `maintenance` and `archive_digest_mismatch`; `requestId` matches the `x-request-id` header.
+- The deployment approval, reconcile and dispatch code (`src/app.ts`, `src/magnus-deployment.ts`, `src/deployment-journal.ts`) is reformatted from single long lines into reviewable statements. Behaviour is unchanged.
+
 ### Fixed
 
 - README: SQLite is a native add-on (`@photostructure/sqlite` prebuilds), not built into Node, and the stale "Hive 3.12.3 pins HiveSkills 1.8.1" sentence is replaced by a pointer to the signed suite release manifest.
@@ -31,6 +34,7 @@
 ### Upgrade notes
 
 - A client that sends a JSON body over 64 KiB to a route other than a release upload or a receipt now gets `413`. No HiveSkills route needs one.
+- A client that read the `error` field as a string must read `error.message` (and may use `error.code`). HiveXUI already parses every suite error shape with `parseHiveError`; the Hermes bridge and Magnus read only status codes.
 - Probes or scripts that compared `release` in `/health/live` or `/healthz` with `1.2.2` now see the package version (for example `1.9.1`).
 - A registry that receives PAM sign-ins through a reverse proxy sees every client at the proxy's address, so 10 failed sign-ins from anyone would make every sign-in through it wait up to 5 minutes. Set `HIVE_SKILLS_TRUSTED_PROXIES` to the proxy's IP. Oathweave bearer sign-in (suite installations) is not throttled and unaffected.
 

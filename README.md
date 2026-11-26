@@ -207,6 +207,9 @@ step with the code).
 
 Every write and deployment action is audit logged with the authenticated OS username.
 
+Errors use the suite envelope, `{"error":{"code":"not_found","message":"Skill not found","requestId":"..."}}`,
+where `requestId` matches the `x-request-id` response header.
+
 Request bodies are limited while they stream: 70 MiB for a JSON release upload, 50 MiB for a raw
 `application/gzip` one, 256 KiB for an agent receipt and 64 KiB for everything else, the sign-in
 included. A larger body is answered with `413`.

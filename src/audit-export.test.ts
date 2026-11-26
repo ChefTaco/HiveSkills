@@ -223,6 +223,6 @@ test('limit bounds and malformed cursors', async () => {
   for (const cursor of ['not*a*cursor', 'bm90LWpzb24', encodeCursor({ i: -1 }), encodeCursor({ i: 1.5 }), encodeCursor({ i: '3' }), encodeCursor({ t: 'x' }), encodeCursor({ i: 1, t: 'x' })]) {
     const response = await exportPage(`?after=${cursor}`);
     assert.equal(response.status, 400, cursor);
-    assert.deepEqual(JSON.parse(response.text), { error: 'Invalid audit export query' });
+    assert.deepEqual((JSON.parse(response.text) as { error: { message: string } }).error.message, 'Invalid audit export query');
   }
 });
