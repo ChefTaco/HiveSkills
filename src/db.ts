@@ -87,9 +87,20 @@ export const store = {
   listReceipts: (targetId?: string) => targetId === undefined
     ? db.prepare('SELECT target,channel,skills_json,receipt_json,updated_at FROM target_policies').all()
     : db.prepare('SELECT target,channel,skills_json,receipt_json,updated_at FROM target_policies WHERE target=?').all(targetId),
-  createSession: (session: Session): void => { db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?)').run(session.id, session.username, session.expiresAt, now()); },
-  getSession: (id: string): Session | undefined => { db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now()); const row = db.prepare('SELECT id, username, expires_at FROM sessions WHERE id=?').get(id) as SessionRow | undefined; return row && { id: row.id, username: row.username, expiresAt: row.expires_at }; },
-  deleteSession: (id: string): void => { db.prepare('DELETE FROM sessions WHERE id=?').run(id); },
+  // Sessions are stored by the SHA-256 of their id, so a copy of the database holds no usable session.
+  createSession: (session: Session): void => { db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?)').run(tokenHash(session.id), session.username, session.expiresAt, now()); },
+  /** The session for a cookie's id. Its `id` is the stored key that `deleteSession` takes. */
+  getSession: (id: string): Session | undefined => {
+    db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
+    const key = tokenHash(id);
+    let row = db.prepare('SELECT id, username, expires_at FROM sessions WHERE id=?').get(key) as SessionRow | undefined;
+    if (!row) {
+      // A session created before ids were hashed is re-keyed on first use, so it stays signed in.
+      row = db.prepare('UPDATE sessions SET id=? WHERE id=? RETURNING id, username, expires_at').get(key, id) as SessionRow | undefined;
+    }
+    return row && { id: row.id, username: row.username, expiresAt: row.expires_at };
+  },
+  deleteSession: (key: string): void => { db.prepare('DELETE FROM sessions WHERE id=?').run(key); },
   // Fleet fields appear only on bound targets, so legacy target listings are unchanged.
   listTargets: (nodeId?: string): ListedTarget[] => {
     const select = 'SELECT t.name,t.host,t.username,t.enabled,b.magnus_node_id,b.agent_refs_json FROM deployment_targets t LEFT JOIN target_agent_links b ON b.target=t.name';

@@ -5,6 +5,13 @@
 ### Added
 
 - `POST /admin/skills/:slug/releases` also accepts the raw archive as `Content-Type: application/gzip` (or `application/x-gzip`), with `version`, `notes`, `minHermesVersion` and `maxHermesVersion` in the query string, so a 50 MiB archive is no longer sent as a 70 MB base64 JSON string. The JSON form is unchanged. Browser contracts add `UploadArchiveQuery`.
+- Failed sign-ins are audited. A PAM failure, and the first refusal of each throttle delay or window, writes a `login.failed` audit row (the attempted account, client address and throttle state; never the password), exported to Cindertrace as `session.login_failed` with `outcome: "failure"`. Names no OS account can have are still answered `401` without an audit row.
+- A per-source sign-in throttle: one client address may fail at most 10 times in 5 minutes across every account, then gets `429`. The per-account 15-second delay is unchanged. `429` answers now carry `Retry-After`. Optional `HIVE_SKILLS_TRUSTED_PROXIES` lists reverse-proxy IPs whose `X-Forwarded-For` names the client.
+- The legacy SSH deployment worker audits each job's outcome (`deployment.finished`, exported as `deployment.complete` with a success or failure outcome), so the export no longer shows a `deployment.queue` with no result.
+
+### Security
+
+- Session ids are stored as their SHA-256, as the README already said; previously the raw id was stored, protected only by the cookie signature. A session created by an earlier release is re-keyed on its first use, so nobody is signed out.
 
 ### Changed
 
@@ -15,6 +22,7 @@
 ### Upgrade notes
 
 - A client that sends a JSON body over 64 KiB to a route other than a release upload or a receipt now gets `413`. No HiveSkills route needs one.
+- A registry that receives PAM sign-ins through a reverse proxy sees every client at the proxy's address, so 10 failed sign-ins from anyone would make every sign-in through it wait up to 5 minutes. Set `HIVE_SKILLS_TRUSTED_PROXIES` to the proxy's IP. Oathweave bearer sign-in (suite installations) is not throttled and unaffected.
 
 ## [1.9.1] - 2026-11-24
 

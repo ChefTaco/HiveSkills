@@ -137,7 +137,15 @@ The service listens on a dedicated TLS port (default `4030`) and does not mint c
 
 `HIVE_SKILLS_SESSION_SECRET` (at least 32 characters) is required. Only a non-production instance bound to a loopback address falls back to an ephemeral random secret, with a warning; its sessions end on restart.
 
-`scripts/deploy-hive-skills.sh` preserves `/opt/hive-skills/shared/.env`, installs the PAM policy and `hive-skills.service`, and activates a health-gated release. New hosts require their own env file; existing hosts retain their own state. `HIVE_SKILLS_ADMIN_USERS` lists the OS accounts allowed to administer the registry (there is no default); authentication is checked through PAM against the host OS account, and the registry stores only a server-side session hash—never an OS password.
+`scripts/deploy-hive-skills.sh` preserves `/opt/hive-skills/shared/.env`, installs the PAM policy and `hive-skills.service`, and activates a health-gated release. New hosts require their own env file; existing hosts retain their own state. `HIVE_SKILLS_ADMIN_USERS` lists the OS accounts allowed to administer the registry (there is no default); authentication is checked through PAM against the host OS account, and the registry stores only the SHA-256 of each session id, never an OS password.
+
+Sign-in is throttled, not locked out: after a failed attempt an account waits 15 seconds, and one
+client address may fail at most 10 times in 5 minutes across all accounts (`429` with
+`Retry-After`). Configure PAM `faillock` (or the host's equivalent) for the real account lockout.
+Behind a reverse proxy, list its address in `HIVE_SKILLS_TRUSTED_PROXIES` (comma-separated IPs) so
+the client address is taken from `X-Forwarded-For`; from any other peer that header is ignored.
+Every refused sign-in is audited as `login.failed` (exported as `session.login_failed`) with the
+account, client address and throttle state.
 
 ## Seed HiveMem
 

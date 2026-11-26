@@ -29,6 +29,8 @@ import { hiveXuiStubResponse } from './hivexui-stub.js';
 import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
 import { archiveDigest } from './archive-digest.js';
+import { LoginThrottle, clientAddress } from './login-throttle.js';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
@@ -37,7 +39,7 @@ type JsonObject = Record<string, unknown>;
 const app = new Hono<{ Variables: Variables }>();
 const verifyIdentity = configuredOathweaveVerifier();
 const accountLinks=parseAccountLinks(process.env.HIVESKILLS_OATHWEAVE_IDENTITIES_JSON??'[]');
-const loginAttempts = new Map<string, number>();
+const loginThrottle = new LoginThrottle();
 const channels = ['stable', 'canary'] as const;
 
 const asObject = (value: unknown): JsonObject =>
@@ -344,21 +346,32 @@ app.get('/v1/skills/:slug/releases/:version/archive', async (c) => {
   return archiveResponse(c, pinnedRelease(skillSlug, version));
 });
 
+// The socket peer (or the client a trusted proxy forwarded for); `unknown` outside a Node server.
+const requestSource = (c: Context): string => {
+  let peer: string | undefined;
+  try { peer = getConnInfo(c).remote.address; } catch { peer = undefined; }
+  return clientAddress(peer, c.req.header('x-forwarded-for'), config.trustedProxies);
+};
+
 app.post('/auth/login', async (c) => {
   const body = await requestJson(c);
   const username = text(body.username, 'username', 32);
   const password = text(body.password, 'password', 1024);
   // A name no OS account can have never reaches PAM, so it must not occupy a throttle slot either.
   if (!validUsername(username)) throw new HTTPException(401, { message: 'OS authentication failed' });
-  for (const [key, expires] of loginAttempts) if (expires <= Date.now()) loginAttempts.delete(key);
-  if (loginAttempts.size >= 1000 && !loginAttempts.has(username)) throw new HTTPException(429, { message: 'Try again shortly' });
-  const previous = loginAttempts.get(username) ?? 0;
-  if (previous > Date.now()) throw new HTTPException(429, { message: 'Try again shortly' });
+  const source = requestSource(c);
+  const refusal = loginThrottle.refusal(username, source);
+  if (refusal) {
+    // Audited once per delay or window, so a flood of refused attempts cannot flood the audit log.
+    if (refusal.first) store.audit(username, 'login.failed', 'session', { username, source, throttled: true, throttle: refusal.reason, retryAfterSeconds: refusal.retryAfterSeconds });
+    throw new HTTPException(429, { message: 'Try again shortly', res: new Response(null, { headers: { 'retry-after': String(refusal.retryAfterSeconds) } }) });
+  }
   if (!await authenticateOsUser(username, password)) {
-    loginAttempts.set(username, Date.now() + 15_000);
+    const state = loginThrottle.failed(username, source);
+    store.audit(username, 'login.failed', 'session', { username, source, throttled: false, accountDelaySeconds: state.accountDelaySeconds, sourceFailures: state.sourceFailures });
     throw new HTTPException(401, { message: 'OS authentication failed' });
   }
-  loginAttempts.delete(username);
+  loginThrottle.succeeded(username);
   const token = createSession(username);
   c.header('Set-Cookie', sessionCookie(token));
   store.audit(username, 'login', 'session', {});
@@ -621,7 +634,10 @@ app.post('/admin/deployments/jobs/:id/reconcile',requireAuth(true),async c=>{
 app.onError((error, c) => {
   const status = error instanceof HTTPException ? error.status : 500;
   if (status === 500) console.error(error);
-  return c.json({ error: status >= 500 ? 'Internal server error' : error.message }, status);
+  const response = c.json({ error: status >= 500 ? 'Internal server error' : error.message }, status);
+  const retryAfter = error instanceof HTTPException ? error.res?.headers.get('retry-after') : null;
+  if (retryAfter) response.headers.set('retry-after', retryAfter);
+  return response;
 });
 
 export default app;
