@@ -20,8 +20,11 @@ export type AuditExportRow = {
 };
 
 /** Stored action names mapped to suite action names, with the kind of record they act on. */
-const ACTIONS: Record<string, { action: string; target: string; withId: boolean }> = {
+type Mapping = { action: string; target: string; withId: boolean; outcome?: (details: Record<string, string | number | boolean>) => 'success' | 'failure' };
+const ACTIONS: Record<string, Mapping> = {
   login: { action: 'session.login', target: 'session', withId: false },
+  // A refused sign-in: the attempted account is the actor; details hold the throttle state, never a password.
+  'login.failed': { action: 'session.login_failed', target: 'session', withId: false, outcome: () => 'failure' },
   // Older rows store the revoked session id as the logout subject: never exported.
   logout: { action: 'session.logout', target: 'session', withId: false },
   seed: { action: 'release.seed', target: 'release', withId: true },
@@ -37,6 +40,8 @@ const ACTIONS: Record<string, { action: string; target: string; withId: boolean 
   'deployment.queued': { action: 'deployment.queue', target: 'target', withId: true },
   'deployment.approved': { action: 'deployment.approve', target: 'target', withId: true },
   'deployment.reconciled': { action: 'deployment.reconcile', target: 'target', withId: true },
+  // The legacy SSH worker's outcome for a queued job.
+  'deployment.finished': { action: 'deployment.complete', target: 'target', withId: true, outcome: (details) => details['status'] === 'completed' ? 'success' : 'failure' },
 };
 /** Audited subjects that are deployment targets, so their fleet link applies. */
 export const TARGET_ACTIONS = Object.entries(ACTIONS).filter(([, value]) => value.target === 'target').map(([key]) => key);
@@ -76,7 +81,7 @@ function exportDetails(raw: string): Record<string, string | number | boolean> {
 }
 
 /** Suite action name for a stored one; unknown actions keep a sanitized `audit.<name>` form. */
-function suiteAction(stored: string): { action: string; target: string | null; withId: boolean } {
+function suiteAction(stored: string): Omit<Mapping, 'target'> & { target: string | null } {
   const known = ACTIONS[stored];
   if (known) return known;
   const name = stored.toLowerCase().replace(/[^a-z0-9_.]+/g, '_').replace(/^\.+|\.+$/g, '').replace(/\.{2,}/g, '.') || 'unknown';
@@ -108,7 +113,7 @@ export function auditRecord(row: AuditExportRow): HiveAuditRecordValue | null {
     product: PRODUCT,
     occurredAt,
     action: mapped.action,
-    outcome: 'success' as const,
+    outcome: mapped.outcome?.(details) ?? 'success',
     actor: { type: actorId === 'system' ? 'system' as const : 'user' as const, id: actorId },
     ...(target ? { target } : {}),
     ...(subject ? { subject } : {}),

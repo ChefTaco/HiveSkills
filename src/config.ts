@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import type { DeploymentTarget } from './types.js';
 import { bundledDeployScript } from './paths.js';
 import { parseHiveXuiUrl } from './hivexui-stub.js';
+import { parseTrustedProxies } from './login-throttle.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -65,6 +66,8 @@ export const config = {
   targets: parseTargets(process.env.HIVE_SKILLS_TARGETS),
   /** HiveXUI address; retired UI paths redirect here when set, otherwise serve a stub page. */
   hivexuiUrl: parseHiveXuiUrl(process.env.HIVEXUI_URL),
+  /** Reverse proxies whose X-Forwarded-For names the client for the sign-in throttle. */
+  trustedProxies: parseTrustedProxies(process.env.HIVE_SKILLS_TRUSTED_PROXIES),
 } as const;
 
 export const requireProductionSecrets = (): void => {

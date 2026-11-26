@@ -3,6 +3,12 @@ import { config } from './config.js';
 import { store } from './db.js';
 import { maintenanceActive } from './release/runtime.js';
 
+/** Record a legacy job's outcome and audit it, so the audit export shows how a queued job ended. */
+function recordOutcome(job: { id: string; target: string }, ok: boolean, code: string): void {
+  store.finishDeployment(job.id, ok, code);
+  store.audit('system', 'deployment.finished', job.target, { id: job.id, status: ok ? 'completed' : 'failed', result: code });
+}
+
 /** One local deployment at a time. Output may contain credentials: retain only exit codes. */
 export function startDeploymentWorker(): () => Promise<void> {
   // Rehearsals must preserve queued/running outcomes as well as prevent dispatch.
@@ -17,7 +23,7 @@ export function startDeploymentWorker(): () => Promise<void> {
     if (!job) return;
     busy = true;
     const target = store.getTarget(job.target);
-    if (!target) { store.finishDeployment(job.id, false, 'target_disabled'); busy = false; return; }
+    if (!target) { recordOutcome(job, false, 'target_disabled'); busy = false; return; }
     try {
       const child = spawn(config.deployScript, ['--target', target.name], {
         stdio: 'ignore', timeout: 120_000,
@@ -28,10 +34,10 @@ export function startDeploymentWorker(): () => Promise<void> {
       let finished = false;
       let complete: () => void = () => {};
       active = new Promise<void>((done) => { complete = done; });
-      const finish = (ok: boolean, code: string) => { if (finished) return; finished = true; store.finishDeployment(job.id, ok, code); busy = false; complete(); };
+      const finish = (ok: boolean, code: string) => { if (finished) return; finished = true; recordOutcome(job, ok, code); busy = false; complete(); };
       child.once('error', () => finish(false, 'launch_failed'));
       child.once('close', (code) => finish(code === 0, code === 0 ? 'timer_installed' : `exit_${code ?? 'signal'}`));
-    } catch { store.finishDeployment(job.id, false, 'launch_failed'); busy = false; }
+    } catch { recordOutcome(job, false, 'launch_failed'); busy = false; }
   }, 1000);
   timer.unref();
   return async () => { clearInterval(timer); await active; };
