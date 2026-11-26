@@ -32,7 +32,7 @@ import { compareVersions, parseVersion } from './compatibility.js';
 import { archiveDigest } from './archive-digest.js';
 import { LoginThrottle, clientAddress } from './login-throttle.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
+import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, SetReleaseAdvisory, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -319,6 +319,9 @@ const archiveResponse = async (c: Context<{ Variables: Variables }>, release: Re
     c.header('Content-Length', String(stat.size));
     c.header('Content-Disposition', `attachment; filename="${release.skillSlug}-${release.version}.tgz"`);
     c.header('X-Content-SHA256', release.sha256);
+    // An advised release is still served; the header warns readers that do not fetch its metadata.
+    const advisory = store.releaseAdvisory(release.skillSlug, release.version);
+    if (advisory) c.header('X-Release-Advisory', advisory.level);
     const body = Readable.toWeb(handle.createReadStream({ start: 0, end: Math.max(stat.size - 1, 0) })) as ReadableStream<Uint8Array>;
     handle = undefined; // The stream owns and closes the handle.
     return c.body(body);
@@ -343,6 +346,7 @@ app.get('/v1/skills/:slug/releases/:version', async (c) => {
     channels: store.releaseChannels(release.skillSlug, release.version),
     archiveUrl: `${config.publicUrl}/v1/skills/${release.skillSlug}/releases/${release.version}/archive`,
     createdAt: release.createdAt,
+    advisory: store.releaseAdvisory(release.skillSlug, release.version),
   }));
 });
 
@@ -508,6 +512,27 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   return c.json(BrowserRelease.parse(release), 201);
 });
 
+// Deprecate or yank an immutable release: an advisory notice only. The release and its archive are
+// unchanged and still served (withdraw it from its channels to stop distribution); a yanked
+// release cannot be promoted again. Pinned readers see the notice in the release metadata.
+app.put('/admin/skills/:slug/releases/:version/advisory', requireAuth(true), async (c) => {
+  const skillSlug = c.req.param('slug');
+  const version = c.req.param('version');
+  if (!store.getRelease(skillSlug, version)) throw new HTTPException(404, { message: 'Release not found' });
+  const body = browserInput(SetReleaseAdvisory, await requestJson(c));
+  const advisory = store.setReleaseAdvisory(skillSlug, version, body.level, body.reason, c.get('auth').username);
+  store.audit(c.get('auth').username, 'release.advisory', `${skillSlug}@${version}`, { level: body.level, reason: body.reason });
+  return c.json(advisory);
+});
+
+app.delete('/admin/skills/:slug/releases/:version/advisory', requireAuth(true), (c) => {
+  const skillSlug = c.req.param('slug');
+  const version = c.req.param('version');
+  if (!store.clearReleaseAdvisory(skillSlug, version)) throw new HTTPException(404, { message: 'Release advisory not found' });
+  store.audit(c.get('auth').username, 'release.advisory.clear', `${skillSlug}@${version}`, {});
+  return c.body(null, 204);
+});
+
 app.get('/admin/channels', requireAuth(true), (c) => c.json(store.listChannels()));
 // Optional exact target filter; without it the historical listing is returned unchanged.
 app.get('/admin/receipts', requireAuth(true), (c) => {
@@ -561,6 +586,7 @@ app.put('/admin/channels/:channel/:slug', requireAuth(true), async (c) => {
   const version = text(body.version, 'version', 64);
   const skill = c.req.param('slug');
   if (!store.getRelease(skill, version)) throw new HTTPException(404, { message: 'Release not found' });
+  if (store.releaseAdvisory(skill, version)?.level === 'yanked') throw new HTTPException(409, { message: 'A yanked release cannot be promoted' });
   store.promoteRelease(skill, version, channel);
   store.audit(c.get('auth').username, 'release.promote', skill, { channel, version });
   return c.json({ ok: true });

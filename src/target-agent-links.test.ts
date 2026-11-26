@@ -67,7 +67,7 @@ test('managed-format-3 adds target agent links without changing released target 
 
 test('the release record pins each migration module checksum', async () => {
   const { SKILLS_MIGRATIONS } = await import('./upgrade.js');
-  for (const id of ['managed-format-1', 'managed-format-2', 'managed-format-3']) {
+  for (const id of ['managed-format-1', 'managed-format-2', 'managed-format-3', 'managed-format-4']) {
     const entry = SKILLS_MIGRATIONS.find((m) => m.component === 'skills' && m.id === id);
     const source = readFileSync(new URL(`../src/migrations/${id}.ts`, import.meta.url));
     assert.equal(entry?.checksum, createHash('sha256').update(source).digest('hex'), id);

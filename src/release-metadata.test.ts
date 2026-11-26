@@ -20,18 +20,18 @@ test('the migration release is this package, and its skills schema checksum is u
   const release = releaseSchema.parse(skillsRelease());
   assert.equal(release.version, pkg.version);
   assert.deepEqual(Object.keys(release.components), ['@hivemagnus/hive-skills']);
-  // The checksum every installation recorded under the legacy 1.2.2 manifest: changing it would make
-  // migrate treat current data as pending.
-  const checksum = hash(JSON.stringify(SKILLS_MIGRATIONS.filter((m) => m.component === 'skills').map((m) => [m.id, m.checksum])));
-  assert.equal(checksum, hash(JSON.stringify([
+  // The migrations every installation recorded under the legacy 1.2.2 manifest come first, unchanged:
+  // the list is append-only, so earlier installations see only the new entries as pending.
+  assert.deepEqual(SKILLS_MIGRATIONS.slice(0, 3).map((m) => [m.id, m.checksum]), [
     ['managed-format-1', 'b73f6f050c25fd3a2a31623d703aebc14d7997598f60e35d4d90f0f99a9a4cfe'],
     ['managed-format-2', 'a9803de4fb36b043e8ab0f7e8fe4f09f652ffa7c9f1d8eed3674a6e4756544f1'],
     ['managed-format-3', 'f0e4ce285573b35b41865eb979dc2959b345342b3450604d7e43d68d969c792f'],
-  ])));
+  ]);
+  assert.ok(SKILLS_MIGRATIONS.every((m) => m.component === 'skills' && m.impact === 'fast'));
   assert.equal(release.dataCompatibility.skills, '^1.1.0');
 });
 
-test('migrate treats a state file written under the legacy 1.2.2 manifest as current', async () => {
+test('migrate keeps a state file written under the legacy 1.2.2 manifest readable', async () => {
   await skillsMigration([], true);
   const stateFile = join(temporary, '.hive-skills-schema.json');
   const state = JSON.parse(readFileSync(stateFile, 'utf8')) as { checksum: string; version: string; readableBy: string };
@@ -44,6 +44,25 @@ test('migrate treats a state file written under the legacy 1.2.2 manifest as cur
   console.log = (line: string) => { lines.push(line); };
   try { await skillsMigration(['--plan']); } finally { console.log = log; }
   assert.deepEqual((JSON.parse(lines[0]!) as { pending: unknown[] }).pending, []);
+});
+
+test('a data directory recorded before the advisory migration applies it', async () => {
+  await skillsMigration([], true);
+  const stateFile = join(temporary, '.hive-skills-schema.json');
+  const { writeFileSync } = await import('node:fs');
+  const state = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, string>;
+  const legacy = hash(JSON.stringify(SKILLS_MIGRATIONS.slice(0, 3).map((m) => [m.id, m.checksum])));
+  writeFileSync(stateFile, JSON.stringify({ ...state, checksum: legacy, version: '1.9.1' }));
+  const plan = async () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => { lines.push(line); };
+    try { await skillsMigration(['--plan']); } finally { console.log = log; }
+    return JSON.parse(lines[0]!) as { pending: unknown[] };
+  };
+  assert.equal((await plan()).pending.length, 1);
+  await skillsMigration([], true);
+  assert.deepEqual((await plan()).pending, []);
 });
 
 test('health and update status report this release, not a legacy bundle', async () => {

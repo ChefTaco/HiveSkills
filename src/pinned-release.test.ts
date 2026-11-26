@@ -66,6 +66,7 @@ test('release metadata reports any immutable version with its digest, size, comp
     channels: ['canary', 'stable'],
     archiveUrl: 'https://skills.example.com/v1/skills/pinned-example/releases/1.1.0/archive',
     createdAt: store.getRelease('pinned-example', '1.1.0')!.createdAt,
+    advisory: null,
   });
   const older = await metadata('1.0.0', asTarget('agent-1', scopedToken).query, asTarget('agent-1', scopedToken).headers);
   assert.equal(older.status, 200);
@@ -156,4 +157,44 @@ test('releases of a disabled skill are neither described nor served', async () =
   } finally {
     store.updateSkill('other-example', { enabled: true });
   }
+});
+
+test('advisories warn pinned readers without changing the immutable release', async () => {
+  const advise = (version: string, body: unknown, headers: Record<string, string> = admin) => app.request(`https://skills.example.com/admin/skills/pinned-example/releases/${version}/advisory`, {
+    method: 'PUT', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const clear = (version: string) => app.request(`https://skills.example.com/admin/skills/pinned-example/releases/${version}/advisory`, { method: 'DELETE', headers: admin });
+  assert.equal((await advise('1.0.0', { level: 'deprecated', reason: 'Superseded' }, member)).status, 403);
+  assert.equal((await advise('9.9.9', { level: 'deprecated', reason: 'Superseded' })).status, 404);
+  for (const invalid of [{ level: 'broken', reason: 'x' }, { level: 'yanked' }, { level: 'yanked', reason: '' }, { level: 'yanked', reason: 'x', extra: 1 }]) {
+    assert.equal((await advise('1.0.0', invalid)).status, 400, JSON.stringify(invalid));
+  }
+  const before = store.getRelease('pinned-example', '1.0.0');
+  const set = await advise('1.0.0', { level: 'yanked', reason: 'Breaks the memory tool' });
+  assert.equal(set.status, 200);
+  const notice = await set.json() as { level: string; reason: string; since: string };
+  assert.deepEqual([notice.level, notice.reason], ['yanked', 'Breaks the memory tool']);
+  assert.deepEqual(store.getRelease('pinned-example', '1.0.0'), before, 'the release row is unchanged');
+  // Pinned readers (targets and administrators) see the notice; the archive is still served, flagged.
+  const pinned = await (await metadata('1.0.0', asTarget('agent-1', scopedToken).query, asTarget('agent-1', scopedToken).headers)).json() as { advisory: unknown; sha256: string };
+  assert.deepEqual(pinned.advisory, notice);
+  const download = await archive('1.0.0', asTarget('agent-1', scopedToken).query, asTarget('agent-1', scopedToken).headers);
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get('x-release-advisory'), 'yanked');
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), archives['pinned-example@1.0.0']);
+  const listed = await (await app.request('https://skills.example.com/admin/skills/pinned-example/releases', { headers: admin })).json() as Array<{ version: string; advisory: unknown }>;
+  assert.deepEqual(listed.find((release) => release.version === '1.0.0')?.advisory, notice);
+  assert.equal(listed.find((release) => release.version === '1.1.0')?.advisory, null);
+  // A yanked release cannot be promoted; a deprecated one can.
+  const promote = (version: string) => app.request('https://skills.example.com/admin/channels/canary/pinned-example', { method: 'PUT', headers: { ...admin, 'content-type': 'application/json' }, body: JSON.stringify({ version }) });
+  assert.equal((await promote('1.0.0')).status, 409);
+  assert.equal((await advise('1.0.0', { level: 'deprecated', reason: 'Use 1.1.0' })).status, 200);
+  assert.equal((await promote('1.0.0')).status, 200);
+  assert.equal((await promote('1.1.0')).status, 200);
+  const audit = (store.listAudit(10, Number.MAX_SAFE_INTEGER) as Array<{ action: string; subject: string }>).filter((row) => row.action.startsWith('release.advisory'));
+  assert.deepEqual(audit.map((row) => row.subject), ['pinned-example@1.0.0', 'pinned-example@1.0.0']);
+  assert.equal((await clear('1.0.0')).status, 204);
+  assert.equal((await clear('1.0.0')).status, 404);
+  assert.equal((await (await metadata('1.0.0', '', admin)).json() as { advisory: unknown }).advisory, null);
+  assert.equal((await archive('1.0.0', '', admin)).headers.get('x-release-advisory'), null);
 });

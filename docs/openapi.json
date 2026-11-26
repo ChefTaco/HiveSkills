@@ -1000,6 +1000,37 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
+          "advisory": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "level": {
+                    "enum": [
+                      "deprecated",
+                      "yanked"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "since": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level",
+                  "reason",
+                  "since"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "archiveUrl": {
             "type": "string"
           },
@@ -1076,7 +1107,8 @@
           "compatibility",
           "channels",
           "archiveUrl",
-          "createdAt"
+          "createdAt",
+          "advisory"
         ],
         "type": "object"
       },
@@ -1191,6 +1223,37 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
         "properties": {
+          "advisory": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "level": {
+                    "enum": [
+                      "deprecated",
+                      "yanked"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "since": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "level",
+                  "reason",
+                  "since"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "createdAt": {
             "type": "string"
           },
@@ -1232,11 +1295,67 @@
         ],
         "type": "object"
       },
+      "ReleaseAdvisory": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "enum": [
+              "deprecated",
+              "yanked"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "reason",
+          "since"
+        ],
+        "type": "object"
+      },
       "ReleaseList": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "items": {
           "additionalProperties": false,
           "properties": {
+            "advisory": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "level": {
+                      "enum": [
+                        "deprecated",
+                        "yanked"
+                      ],
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "since": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "level",
+                    "reason",
+                    "since"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "createdAt": {
               "type": "string"
             },
@@ -1279,6 +1398,29 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "SetReleaseAdvisory": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "enum": [
+              "deprecated",
+              "yanked"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "reason"
+        ],
+        "type": "object"
       },
       "Skill": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2396,6 +2538,88 @@
           }
         ],
         "summary": "POST /admin/skills/{slug}/releases"
+      }
+    },
+    "/admin/skills/{slug}/releases/{version}/advisory": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; see the native API reference for payloads"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "DELETE /admin/skills/{slug}/releases/{version}/advisory"
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; see the native API reference for payloads"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "PUT /admin/skills/{slug}/releases/{version}/advisory"
       }
     },
     "/admin/targets": {
