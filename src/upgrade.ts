@@ -48,6 +48,14 @@ export const SKILLS_MIGRATIONS: Release['migrations'] = [
     readableBy: '^1.1.0',
     note: 'Add optional Magnus node and agent reference bindings for deployment targets in a side table; legacy target rows and older binaries are unaffected.',
   },
+  {
+    component: 'skills',
+    id: 'managed-format-4',
+    checksum: '68c0c42def3a6c23d31833b32e3a9119644d6f265922fb90b9076a9be8e1fd44',
+    impact: 'fast',
+    readableBy: '^1.1.0',
+    note: 'Add advisory deprecation and yank notices for immutable releases in a side table; release rows and older binaries are unaffected.',
+  },
 ];
 /** The oldest HiveSkills whose code reads data written by this one. */
 export const SKILLS_DATA_COMPATIBILITY = '^1.1.0';
@@ -106,6 +114,7 @@ export async function skillsMigration(args: readonly string[], automatic = false
         dataChanged:
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='deployment_authorizations'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='target_agent_links'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_advisories'").get() ||
           !columns.has('min_hermes_version') ||
           !columns.has('max_hermes_version') ||
           !db.prepare("SELECT id FROM registry_migrations WHERE id='release-channels'").get(),

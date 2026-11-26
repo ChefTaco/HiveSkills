@@ -19,6 +19,9 @@ export type Release = {
   createdAt: string;
 };
 
+/** An advisory notice on an immutable release: it stays downloadable, but readers are warned. */
+export type ReleaseAdvisory = { level: 'deprecated' | 'yanked'; reason: string; since: string };
+
 export type Session = { id: string; username: string; expiresAt: string };
 export type DeploymentTarget = { name: string; host: string; username: string; enabled: boolean };
 /** Optional fleet binding; agent references use `<magnusNodeId>~<profile>`. */

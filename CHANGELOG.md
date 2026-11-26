@@ -8,6 +8,7 @@
 - Failed sign-ins are audited. A PAM failure, and the first refusal of each throttle delay or window, writes a `login.failed` audit row (the attempted account, client address and throttle state; never the password), exported to Cindertrace as `session.login_failed` with `outcome: "failure"`. Names no OS account can have are still answered `401` without an audit row.
 - A per-source sign-in throttle: one client address may fail at most 10 times in 5 minutes across every account, then gets `429`. The per-account 15-second delay is unchanged. `429` answers now carry `Retry-After`. Optional `HIVE_SKILLS_TRUSTED_PROXIES` lists reverse-proxy IPs whose `X-Forwarded-For` names the client.
 - The legacy SSH deployment worker audits each job's outcome (`deployment.finished`, exported as `deployment.complete` with a success or failure outcome), so the export no longer shows a `deployment.queue` with no result.
+- Deprecation and yank notices on releases. `PUT /admin/skills/:slug/releases/:version/advisory` with `{"level":"deprecated"|"yanked","reason"}` sets (or replaces) a notice and `DELETE` on the same path clears it; both are audited (`release.advisory`, `release.advisory.clear`; exported as `release.advisory_set` and `release.advisory_clear`). Releases stay immutable and downloadable and keep their channels. Pinned readers learn of it: `GET /v1/skills/:slug/releases/:version` reports `advisory` (`{level, reason, since}` or `null`), archive downloads of an advised release carry `X-Release-Advisory: deprecated|yanked`, and `GET /admin/skills/:slug/releases` lists each release's `advisory`. A yanked release cannot be promoted (`409`). The agent manifest is unchanged, so approved Magnus publications compare equal as before. Browser contracts add `ReleaseAdvisory` and `SetReleaseAdvisory`.
 - `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` accepts `oathweave: { tokenUrl, clientId, clientSecretFile, audience, scope? }` in place of `credentialFile`. HiveSkills then authenticates to the Magnus executor with short-lived, audience-bound Oathweave `client_credentials` tokens (HiveCommon `createServiceTokenProvider()`, cached and refreshed before expiry) instead of a long-lived bearer read from disk on every call, and after a `401` fetches a fresh token and retries once. Exactly one of the two must be configured; `credentialFile` works as before. The executor must accept Oathweave service tokens for the configured audience.
 
 ### Security
@@ -33,6 +34,10 @@
 ### Fixed
 
 - README: SQLite is a native add-on (`@photostructure/sqlite` prebuilds), not built into Node, and the stale "Hive 3.12.3 pins HiveSkills 1.8.1" sentence is replaced by a pointer to the signed suite release manifest.
+
+### Migrations
+
+- `managed-format-4` (fast, additive): a `release_advisories` side table. Release rows are untouched and older binaries (`^1.1.0`) still read and write the data. Run `hive-skills migrate` (or start with `HIVE_AUTO_MIGRATE=true`); suite upgrades need `--allow-migrations`.
 
 ### Upgrade notes
 

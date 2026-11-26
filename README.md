@@ -199,6 +199,7 @@ step with the code).
   with `archiveBase64`, or the raw archive as `Content-Type: application/gzip` with `version`,
   `notes`, `minHermesVersion` and `maxHermesVersion` in the query string
 - `GET /admin/channels`, `PUT /admin/channels/:channel/:slug` (promote), `DELETE /admin/channels/:channel/:slug` (withdraw)
+- `PUT /admin/skills/:slug/releases/:version/advisory` (`{"level":"deprecated"|"yanked","reason"}`), `DELETE` the same path – an advisory notice on an immutable release: it stays downloadable and promoted where it is, pinned-release metadata reports it as `advisory`, its archive carries `X-Release-Advisory`, and a yanked release cannot be promoted again. Withdraw it from its channels to stop distribution
 - `GET /admin/targets`, `PUT /admin/targets/:name`, `POST /admin/targets/:name/enroll`, `GET /admin/receipts`
 - `GET /admin/deployments`, `GET /admin/deployments/capabilities`, `POST /admin/deployments/:target`,
   `GET /admin/deployments/jobs/:id`, `POST /admin/deployments/jobs/:id/approve`, `POST /admin/deployments/jobs/:id/reconcile`

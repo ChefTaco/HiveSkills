@@ -7,7 +7,7 @@ import { compatibleVersion } from './compatibility.js';
 import type { HiveEventRecords } from './hive-events.js';
 import { EVENT_AUDIT_ACTIONS, EVENT_DEPLOYMENT_STATUSES } from './hive-events.js';
 import { TARGET_ACTIONS, type AuditExportRow } from './audit-export.js';
-import type { DeploymentTarget, ListedTarget, Release, Session, Skill, TargetBinding } from './types.js';
+import type { DeploymentTarget, ListedTarget, Release, ReleaseAdvisory, Session, Skill, TargetBinding } from './types.js';
 if (!existsSync(config.databasePath)) throw new Error('Skills database is missing; run hive-skills migrate before opening storage');
 const db = new DatabaseSync(config.databasePath, { enableForeignKeyConstraints: true });
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -18,6 +18,8 @@ type SessionRow = { id: string; username: string; expires_at: string };
 type TargetRow = { name: string; host: string; username: string; enabled: number };
 type ListedTargetRow = TargetRow & { magnus_node_id: string | null; agent_refs_json: string | null };
 const now = (): string => new Date().toISOString();
+type AdvisoryRow = { version: string; level: ReleaseAdvisory['level']; reason: string; created_at: string };
+const mapAdvisory = (row: AdvisoryRow): ReleaseAdvisory => ({ level: row.level, reason: row.reason, since: row.created_at });
 const mapSkill = (row: SkillRow): Skill => ({ slug: row.slug, name: row.name, description: row.description, homepage: row.homepage, enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at });
 const mapRelease = (row: ReleaseRow): Release => ({ skillSlug: row.skill_slug, version: row.version, sha256: row.sha256, archivePath: row.archive_path, notes: row.notes, minHermesVersion: row.min_hermes_version, maxHermesVersion: row.max_hermes_version, createdAt: row.created_at });
 
@@ -70,7 +72,20 @@ export const store = {
   promoteRelease: (slug: string, version: string, channel: string): void => { db.prepare('INSERT INTO channel_releases VALUES (?,?,?) ON CONFLICT(channel,skill_slug) DO UPDATE SET version=excluded.version').run(channel, slug, version); },
   withdrawRelease: (slug: string, channel: string) => db.prepare('DELETE FROM channel_releases WHERE channel=? AND skill_slug=?').run(channel, slug),
   listChannels: () => db.prepare('SELECT * FROM channel_releases ORDER BY channel,skill_slug').all(),
-  listReleases: (slug: string): Release[] => (db.prepare('SELECT * FROM releases WHERE skill_slug=? ORDER BY created_at DESC').all(slug) as ReleaseRow[]).map(mapRelease),
+  listReleases: (slug: string): Array<Release & { advisory: ReleaseAdvisory | null }> => {
+    const advisories = new Map((db.prepare('SELECT version,level,reason,created_at FROM release_advisories WHERE skill_slug=?').all(slug) as AdvisoryRow[]).map((row) => [row.version, mapAdvisory(row)]));
+    return (db.prepare('SELECT * FROM releases WHERE skill_slug=? ORDER BY created_at DESC').all(slug) as ReleaseRow[]).map((row) => ({ ...mapRelease(row), advisory: advisories.get(row.version) ?? null }));
+  },
+  releaseAdvisory: (slug: string, version: string): ReleaseAdvisory | null => {
+    const row = db.prepare('SELECT version,level,reason,created_at FROM release_advisories WHERE skill_slug=? AND version=?').get(slug, version) as AdvisoryRow | undefined;
+    return row ? mapAdvisory(row) : null;
+  },
+  /** Set or replace the notice on an existing release; the release itself never changes. */
+  setReleaseAdvisory: (slug: string, version: string, level: ReleaseAdvisory['level'], reason: string, actor: string): ReleaseAdvisory => {
+    db.prepare('INSERT INTO release_advisories VALUES (?,?,?,?,?,?) ON CONFLICT(skill_slug,version) DO UPDATE SET level=excluded.level,reason=excluded.reason,actor=excluded.actor,created_at=excluded.created_at').run(slug, version, level, reason, actor, now());
+    return store.releaseAdvisory(slug, version)!;
+  },
+  clearReleaseAdvisory: (slug: string, version: string): boolean => db.prepare('DELETE FROM release_advisories WHERE skill_slug=? AND version=?').run(slug, version).changes === 1,
   listAudit: (limit: number, before: number) => db.prepare('SELECT id,actor,action,subject,details,created_at FROM audit_log WHERE id<? ORDER BY id DESC LIMIT ?').all(before,limit),
   enrollTarget: (target: string, channel: string, skills: string[] | null): string => {
     const token = randomBytes(32).toString('base64url');
