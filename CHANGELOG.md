@@ -2,9 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `HIVE_SKILLS_TRUSTED_PROXIES` also accepts CIDR ranges (`10.0.0.0/8`) and the presets `loopback`, `private` and `linklocal`, comma- or space-separated. Existing lists of exact addresses work unchanged.
+- Require `@hivemagnus/hive-common` 0.7.0 (was 0.6.1), for `/rate-limit`.
+
 ### Fixed
 
 - Automatic canary rollback (`HIVE_SKILLS_CANARY_AUTO_ROLLBACK=true`) now works with the shipped Hermes bridge and is scoped to what changed. The bridge used to throw on a failed gateway restart without telling the registry, so rollback never fired; it now posts a `restart_failed` receipt before exiting with the error. It also checks a running gateway is still active (and was not restarted again by systemd) after a settle delay before it reports `activated` (`HIVE_SKILLS_RESTART_SETTLE_MS`, default 10000), so promotion counts healthy gateways rather than accepted restart jobs. Receipts gain an optional `changed` list (the skills installed since the gateway last restarted cleanly, kept across runs while a restart is pending) and rollback acts only on the canary skills named there; previously every canary skill in the receipt was rolled back, including long-healthy ones. **Upgrade:** redeploy the bridge to agent hosts (`scripts/deploy-hermes-agent.sh`) to get the receipts; a sync that restarts a running gateway now takes about 10 seconds longer. A custom agent that sends `restart_failed` without `changed` no longer triggers a rollback.
+
+### Security
+
+- The sign-in throttle resolves the client address with HiveCommon `/rate-limit` (`resolveClientAddress()`, `addressKey()`) instead of its own `X-Forwarded-For` parser. Forwarded addresses with a port (`192.0.2.1:5678`, `[2001:db8::1]:443`) are now read as that client; previously they were invalid, so every client behind such a proxy shared the proxy's source budget. An IPv6 client is counted by its /64, so one host cannot get a fresh budget per address. The per-account delay table no longer refuses new accounts when full (previously a few sources, each within its own limit, could fill its 1000 slots and block every sign-in with `429`); it holds 10 000 and forgets the oldest delay. The `capacity` throttle reason is gone from `login.failed` audit rows.
+- A session id is re-keyed from the pre-hashing format only when it has the issued format (43 base64url characters), so a stored 64-hex session hash can never be presented as a session id.
 
 ## [1.10.0] - 2026-11-26
 

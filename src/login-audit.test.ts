@@ -85,14 +85,47 @@ test('behind a trusted proxy the forwarded client is the source', async () => {
 });
 
 test('client addresses honour only trusted proxies', () => {
-  const trusted = throttle.parseTrustedProxies('192.0.2.10, ::ffff:192.0.2.11');
+  const trusted = throttle.parseTrustedProxies('192.0.2.10, ::ffff:192.0.2.11, 10.1.0.0/16');
   assert.equal(throttle.clientAddress('::ffff:198.51.100.1', undefined, trusted), '198.51.100.1');
   assert.equal(throttle.clientAddress('198.51.100.1', '203.0.113.1', trusted), '198.51.100.1');
   assert.equal(throttle.clientAddress('192.0.2.10', '203.0.113.1, 203.0.113.2', trusted), '203.0.113.2');
   assert.equal(throttle.clientAddress('192.0.2.10', '203.0.113.1, 192.0.2.11', trusted), '203.0.113.1');
   assert.equal(throttle.clientAddress('192.0.2.10', 'not-an-ip, 192.0.2.11', trusted), '192.0.2.11');
   assert.equal(throttle.clientAddress(undefined, '203.0.113.1', trusted), 'unknown');
-  assert.throws(() => throttle.parseTrustedProxies('proxy.example.com'), /must be an IP address/);
+  assert.throws(() => throttle.parseTrustedProxies('proxy.example.com'), /HIVE_SKILLS_TRUSTED_PROXIES/);
+  assert.throws(() => throttle.parseTrustedProxies('10.0.0.0/33'), /HIVE_SKILLS_TRUSTED_PROXIES/);
+  // CIDR ranges and presets.
+  assert.equal(throttle.clientAddress('10.1.2.3', '203.0.113.1', trusted), '203.0.113.1');
+  assert.equal(throttle.clientAddress('10.2.0.1', '203.0.113.1', trusted), '10.2.0.1');
+  assert.equal(throttle.clientAddress('127.0.0.1', '203.0.113.1', throttle.parseTrustedProxies('loopback')), '203.0.113.1');
+  // Proxies that append the client port: each client is still its own source.
+  assert.equal(throttle.clientAddress('192.0.2.10', '203.0.113.5:51234', trusted), '203.0.113.5');
+  assert.equal(throttle.clientAddress('192.0.2.10', '[2001:db8::1]:443', trusted), '2001:db8::1');
+});
+
+test('IPv6 clients are throttled by their /64', () => {
+  assert.equal(throttle.sourceKey('2001:db8:1:2:aaaa::1'), throttle.sourceKey('2001:db8:1:2:bbbb::2'));
+  assert.notEqual(throttle.sourceKey('2001:db8:1:2::1'), throttle.sourceKey('2001:db8:1:3::1'));
+  assert.equal(throttle.sourceKey('203.0.113.5'), '203.0.113.5');
+  assert.equal(throttle.sourceKey('unknown'), 'unknown');
+});
+
+test('a full account table forgets the oldest delay instead of refusing everyone', () => {
+  let now = 1_000_000;
+  const limiter = new throttle.LoginThrottle(() => now);
+  for (let index = 0; index < throttle.MAX_ACCOUNTS; index++) limiter.failed(`flood-${index}`, `source-${index % 1000}`);
+  // A legitimate account that never failed may still try.
+  assert.equal(limiter.refusal('legitimate', 'source-legit'), undefined);
+  limiter.failed('legitimate', 'source-legit');
+  assert.equal(limiter.refusal('legitimate', 'source-legit')?.reason, 'account');
+  // The oldest flood entry made room; the newest is still delayed.
+  assert.equal(limiter.refusal('flood-0', 'source-legit'), undefined);
+  assert.equal(limiter.refusal(`flood-${throttle.MAX_ACCOUNTS - 1}`, 'source-legit')?.reason, 'account');
+  // A repeated failure moves the account to the back, so it is not the next to be forgotten.
+  limiter.failed('flood-1', 'source-legit');
+  limiter.failed('another', 'source-legit');
+  assert.equal(limiter.refusal('flood-1', 'source-legit')?.reason, 'account');
+  assert.equal(limiter.refusal('flood-2', 'source-legit'), undefined);
 });
 
 test('throttle delays and windows expire', () => {
@@ -117,13 +150,23 @@ test('sessions are stored by hash and older raw-id sessions are re-keyed', () =>
     assert.equal(db.prepare('SELECT 1 FROM sessions WHERE id=?').get(id), undefined);
     assert.equal(readAuth(`hive_skills_session=${token}`)?.username, 'admin');
     // A row written by an earlier release holds the raw id.
-    const legacy = 'legacy-session-id-0123456789abcdefghijklmnopq';
+    const legacy = 'legacy-session-id-0123456789abcdefghijklmno';
+    assert.equal(legacy.length, 43);
+    const sign = (value: string) => `${value}.${createHmac('sha256', process.env.HIVE_SKILLS_SESSION_SECRET!).update(value).digest('base64url')}`;
     db.prepare('INSERT INTO sessions VALUES (?,?,?,?)').run(legacy, 'admin', new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
-    const signed = `${legacy}.${createHmac('sha256', process.env.HIVE_SKILLS_SESSION_SECRET!).update(legacy).digest('base64url')}`;
+    const signed = sign(legacy);
     assert.equal(readAuth(`hive_skills_session=${signed}`)?.username, 'admin');
     assert.equal(db.prepare('SELECT 1 FROM sessions WHERE id=?').get(legacy), undefined);
-    assert.ok(db.prepare('SELECT 1 FROM sessions WHERE id=?').get(createHash('sha256').update(legacy).digest('hex')));
+    const stored = createHash('sha256').update(legacy).digest('hex');
+    assert.ok(db.prepare('SELECT 1 FROM sessions WHERE id=?').get(stored));
     assert.equal(readAuth(`hive_skills_session=${signed}`)?.username, 'admin');
+    // The stored hash is never itself a session id, even in a correctly signed cookie.
+    assert.equal(readAuth(`hive_skills_session=${sign(stored)}`), undefined);
+    assert.ok(db.prepare('SELECT 1 FROM sessions WHERE id=?').get(stored), 'the row was not re-keyed');
+    // Nor is a raw id in any other format.
+    const odd = 'not-an-issued-session-id';
+    db.prepare('INSERT INTO sessions VALUES (?,?,?,?)').run(odd, 'admin', new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
+    assert.equal(readAuth(`hive_skills_session=${sign(odd)}`), undefined);
   } finally { db.close(); }
 });
 

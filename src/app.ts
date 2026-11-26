@@ -32,7 +32,7 @@ import { compareVersions, parseVersion } from './compatibility.js';
 import { archiveDigest } from './archive-digest.js';
 import { verifyReleaseSignature } from '../scripts/archive-utils.mjs';
 import type { ReleaseSignature } from './types.js';
-import { LoginThrottle, clientAddress } from './login-throttle.js';
+import { LoginThrottle, clientAddress, sourceKey } from './login-throttle.js';
 import { applyRolloutPolicy } from './rollout.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, SetReleaseAdvisory, SetReleaseSignature, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
@@ -393,15 +393,17 @@ app.post('/auth/login', async (c) => {
   const password = text(body.password, 'password', 1024);
   // A name no OS account can have never reaches PAM, so it must not occupy a throttle slot either.
   if (!validUsername(username)) throw new HTTPException(401, { message: 'OS authentication failed' });
+  // The audit names the client address; the throttle counts its key (an IPv6 client by its /64).
   const source = requestSource(c);
-  const refusal = loginThrottle.refusal(username, source);
+  const throttleKey = sourceKey(source);
+  const refusal = loginThrottle.refusal(username, throttleKey);
   if (refusal) {
     // Audited once per delay or window, so a flood of refused attempts cannot flood the audit log.
     if (refusal.first) store.audit(username, 'login.failed', 'session', { username, source, throttled: true, throttle: refusal.reason, retryAfterSeconds: refusal.retryAfterSeconds });
     throw rateLimited(refusal.retryAfterSeconds);
   }
   if (!await authenticateOsUser(username, password)) {
-    const state = loginThrottle.failed(username, source);
+    const state = loginThrottle.failed(username, throttleKey);
     store.audit(username, 'login.failed', 'session', { username, source, throttled: false, accountDelaySeconds: state.accountDelaySeconds, sourceFailures: state.sourceFailures });
     throw new HTTPException(401, { message: 'OS authentication failed' });
   }
