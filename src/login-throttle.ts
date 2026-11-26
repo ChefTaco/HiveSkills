@@ -1,4 +1,4 @@
-import { isIP } from 'node:net';
+import { addressKey, resolveClientAddress, trustedProxies, type TrustedProxies } from '@hivemagnus/hive-common/rate-limit';
 
 /**
  * Sign-in throttling for PAM accounts. It slows guessing down; it is not a lockout. Configure
@@ -11,13 +11,16 @@ import { isIP } from 'node:net';
 export const ACCOUNT_DELAY_MS = 15_000;
 export const SOURCE_WINDOW_MS = 5 * 60_000;
 export const SOURCE_MAX_FAILURES = 10;
-/** Accounts with a pending delay; beyond this new accounts are refused until delays expire. */
-export const MAX_ACCOUNTS = 1000;
+/**
+ * Accounts with a pending delay; beyond this the oldest delay is forgotten. Refusing new accounts
+ * instead would let a few sources, each within its own limit, block every sign-in.
+ */
+export const MAX_ACCOUNTS = 10_000;
 /** Tracked sources; beyond this the oldest source is forgotten rather than refusing everyone. */
 export const MAX_SOURCES = 10_000;
 
 export type Refusal = {
-  reason: 'account' | 'source' | 'capacity';
+  reason: 'account' | 'source';
   retryAfterSeconds: number;
   /** True only for the first refusal of this delay or window, so refusals are audited once. */
   first: boolean;
@@ -52,13 +55,16 @@ export class LoginThrottle {
       const first = !account.refused; account.refused = true;
       return { reason: 'account', retryAfterSeconds: seconds(account.until), first };
     }
-    if (this.accounts.size >= MAX_ACCOUNTS) return { reason: 'capacity', retryAfterSeconds: seconds(Math.min(...[...this.accounts.values()].map((value) => value.until))), first: false };
     return undefined;
   }
 
   /** Record a failed PAM attempt; returns the account delay and the source's failures in its window. */
   failed(username: string, source: string): { accountDelaySeconds: number; sourceFailures: number } {
     const now = this.clock();
+    // Delays all last ACCOUNT_DELAY_MS, so insertion order is expiry order: re-insert, then drop
+    // the soonest to expire when full.
+    this.accounts.delete(username);
+    if (this.accounts.size >= MAX_ACCOUNTS) this.accounts.delete(this.accounts.keys().next().value!);
     this.accounts.set(username, { until: now + ACCOUNT_DELAY_MS, refused: false });
     let from = this.sources.get(source);
     if (!from) {
@@ -76,34 +82,24 @@ export class LoginThrottle {
   }
 }
 
-/** `::ffff:192.0.2.1` and `192.0.2.1` are one source. */
-const normalize = (address: string): string => {
-  const trimmed = address.trim().replace(/^\[|\]$/g, '');
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(trimmed);
-  return (mapped ? mapped[1]! : trimmed).toLowerCase();
-};
-
-/** Exact proxy addresses from `HIVE_SKILLS_TRUSTED_PROXIES` (comma-separated). */
-export function parseTrustedProxies(value: string | undefined): ReadonlySet<string> {
-  const entries = (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
-  for (const entry of entries) if (!isIP(normalize(entry))) throw new Error(`HIVE_SKILLS_TRUSTED_PROXIES entry "${entry}" must be an IP address`);
-  return new Set(entries.map(normalize));
+/**
+ * Proxies from `HIVE_SKILLS_TRUSTED_PROXIES`: IP addresses, CIDR ranges and the presets `loopback`,
+ * `private` and `linklocal`, comma- or space-separated (HiveCommon `trustedProxies()`).
+ */
+export function parseTrustedProxies(value: string | undefined): TrustedProxies {
+  try { return trustedProxies(value); } catch (error) {
+    throw new Error(`HIVE_SKILLS_TRUSTED_PROXIES: ${error instanceof Error ? error.message : String(error)}; use IP addresses, CIDR ranges or loopback, private, linklocal`);
+  }
 }
 
 /**
- * The client address: the socket peer, or, when the peer is a trusted proxy, the right-most
- * `X-Forwarded-For` address that is not itself a trusted proxy. `unknown` when there is no peer.
+ * The client address (HiveCommon `resolveClientAddress()`): the socket peer, or, when the peer is a
+ * trusted proxy, the right-most `X-Forwarded-For` address that is not itself a trusted proxy. Ports
+ * (`192.0.2.1:5678`, `[2001:db8::1]:443`) are stripped. `unknown` when there is no peer.
  */
-export function clientAddress(peer: string | undefined, forwardedFor: string | undefined, trusted: ReadonlySet<string>): string {
-  if (!peer || !isIP(normalize(peer))) return 'unknown';
-  let address = normalize(peer);
-  if (!trusted.has(address) || !forwardedFor) return address;
-  const hops = forwardedFor.split(',').map(normalize);
-  for (let index = hops.length - 1; index >= 0; index--) {
-    const hop = hops[index]!;
-    if (!isIP(hop)) return address;
-    address = hop;
-    if (!trusted.has(hop)) return hop;
-  }
-  return address;
+export function clientAddress(peer: string | undefined, forwardedFor: string | undefined, trusted: TrustedProxies): string {
+  return resolveClientAddress({ peer, forwardedFor, trusted }).address;
 }
+
+/** The throttle key of a client address: the address for IPv4, its /64 for IPv6 (HiveCommon `addressKey()`). */
+export const sourceKey = (address: string): string => addressKey(address);
