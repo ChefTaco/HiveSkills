@@ -1079,6 +1079,31 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "signature": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "keyId": {
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "type": "string"
+                  },
+                  "value": {
+                    "pattern": "^[A-Za-z0-9_-]{86}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyId",
+                  "value"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "size": {
             "anyOf": [
               {
@@ -1108,7 +1133,8 @@
           "channels",
           "archiveUrl",
           "createdAt",
-          "advisory"
+          "advisory",
+          "signature"
         ],
         "type": "object"
       },
@@ -1279,6 +1305,31 @@
             "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
+          "signature": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "keyId": {
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "type": "string"
+                  },
+                  "value": {
+                    "pattern": "^[A-Za-z0-9_-]{86}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyId",
+                  "value"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "skillSlug": {
             "type": "string"
           },
@@ -1381,6 +1432,31 @@
               "pattern": "^[a-f0-9]{64}$",
               "type": "string"
             },
+            "signature": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "keyId": {
+                      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                      "type": "string"
+                    },
+                    "value": {
+                      "pattern": "^[A-Za-z0-9_-]{86}$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "keyId",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "skillSlug": {
               "type": "string"
             },
@@ -1398,6 +1474,25 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "ReleaseSignature": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "keyId": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyId",
+          "value"
+        ],
+        "type": "object"
       },
       "SetReleaseAdvisory": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1419,6 +1514,25 @@
         "required": [
           "level",
           "reason"
+        ],
+        "type": "object"
+      },
+      "SetReleaseSignature": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "keyId": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyId",
+          "value"
         ],
         "type": "object"
       },
@@ -1700,6 +1814,14 @@
               }
             ]
           },
+          "signature": {
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "type": "string"
+          },
+          "signatureKeyId": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "type": "string"
+          },
           "version": {
             "maxLength": 64,
             "minLength": 1,
@@ -1753,6 +1875,14 @@
                 "type": "null"
               }
             ]
+          },
+          "signature": {
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "type": "string"
+          },
+          "signatureKeyId": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "type": "string"
           },
           "version": {
             "maxLength": 64,
@@ -2620,6 +2750,48 @@
           }
         ],
         "summary": "PUT /admin/skills/{slug}/releases/{version}/advisory"
+      }
+    },
+    "/admin/skills/{slug}/releases/{version}/signature": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; see the native API reference for payloads"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "PUT /admin/skills/{slug}/releases/{version}/signature"
       }
     },
     "/admin/targets": {

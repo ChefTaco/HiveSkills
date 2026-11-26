@@ -260,6 +260,37 @@ Linked targets list these fields; unlinked targets are listed exactly as before.
 that node, and `GET /admin/receipts?targetId=<name>` returns only that target's
 receipts. Without the parameters both listings are unchanged.
 
+### Publisher-signed releases
+
+A digest in the manifest proves only that an archive is what the registry serves. To make agent
+hosts trust a publisher instead of the registry, sign each release with an Ed25519 key that never
+reaches the registry host:
+
+```bash
+node scripts/sign-release.mjs keygen --out publisher.pem --key-id example-2026
+# prints {"keyId":"example-2026","publicKey":"<base64url>"}
+node scripts/sign-release.mjs sign --key publisher.pem --key-id example-2026 \
+  --slug my-skill --version 1.2.0 --archive my-skill-1.2.0.tgz
+# prints {"keyId","signature","sha256"}
+```
+
+The signature covers `hiveskills-release-signature-v1\n<slug>\n<version>\n<sha256>\n`. Upload it
+with the release (`signatureKeyId` and `signature`, in the JSON body or the raw upload's query
+string), or attach it to an existing release with
+`PUT /admin/skills/:slug/releases/:version/signature` (`{"keyId","value"}`); the release itself never
+changes. The registry checks every signature against `HIVE_SKILLS_PUBLISHER_KEYS`
+(`[{"keyId","publicKey"}]`) and, with `HIVE_SKILLS_REQUIRE_SIGNED_RELEASES=true`, refuses unsigned
+uploads. Pinned-release metadata and the admin release list report `signature`.
+
+On an agent host, set the same `HIVE_SKILLS_PUBLISHER_KEYS` in the bridge's private environment
+(`~/.config/hive-skills/bridge.env`). The bridge then reads each release's signature from the
+pinned-release metadata with its target token and refuses the whole sync, before downloading or
+activating anything, unless every release it is about to install is signed by a pinned key. A
+compromised registry or administrator session can no longer push code the publisher did not sign.
+This needs an enrolled target (`HIVE_SKILLS_TARGET` and its token) and applies to Magnus-approved
+publications too. The bundled HiveMem seed is unsigned: sign it, or any other existing release,
+before pinning keys on hosts that install it.
+
 ### Event feed
 
 `GET /v1/hive/events?after=<cursor>&limit=<n>` serves HiveEvent v1 events for the

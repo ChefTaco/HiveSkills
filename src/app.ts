@@ -30,9 +30,11 @@ import { HiveError, errorJson, onError, rateLimited } from './errors.js';
 import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
 import { archiveDigest } from './archive-digest.js';
+import { verifyReleaseSignature } from '../scripts/archive-utils.mjs';
+import type { ReleaseSignature } from './types.js';
 import { LoginThrottle, clientAddress } from './login-throttle.js';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, SetReleaseAdvisory, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
+import { Release as BrowserRelease, PinnedRelease, CreateSkill, UpdateSkill, UploadRelease, UploadArchiveQuery, SetReleaseAdvisory, SetReleaseSignature, UpdateTarget, PromoteRelease, EnrollTarget, TargetQuery, ReceiptQuery } from './browser-contracts.js';
 
 type Variables = { auth: AuthContext };
 type JsonObject = Record<string, unknown>;
@@ -347,6 +349,7 @@ app.get('/v1/skills/:slug/releases/:version', async (c) => {
     archiveUrl: `${config.publicUrl}/v1/skills/${release.skillSlug}/releases/${release.version}/archive`,
     createdAt: release.createdAt,
     advisory: store.releaseAdvisory(release.skillSlug, release.version),
+    signature: store.releaseSignature(release.skillSlug, release.version),
   }));
 });
 
@@ -450,13 +453,19 @@ app.delete('/admin/skills/:slug', requireAuth(true), (c) => {
   return c.body(null, 204);
 });
 
+/** A publisher signature must verify against a configured key, for exactly this release. */
+const assertSignature = (skillSlug: string, version: string, sha256: string, signature: ReleaseSignature, cleanup: () => void = () => {}): void => {
+  if (!config.publisherKeys.has(signature.keyId)) { cleanup(); throw new HTTPException(400, { message: 'Unknown publisher key' }); }
+  if (!verifyReleaseSignature(config.publisherKeys, { slug: skillSlug, version, sha256 }, signature)) { cleanup(); throw new HTTPException(400, { message: 'Release signature does not verify' }); }
+};
+
 // A release upload is either JSON with `archiveBase64`, or the raw archive bytes as
 // `application/gzip` with the release fields in the query string, which avoids holding a base64
 // string of the archive in memory.
 app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   const skillId = c.req.param('slug');
   if (!store.getSkill(skillId)) throw new HTTPException(404, { message: 'Skill not found' });
-  let body: { version: string; notes?: string | null | undefined; minHermesVersion?: string | null | undefined; maxHermesVersion?: string | null | undefined };
+  let body: { version: string; notes?: string | null | undefined; minHermesVersion?: string | null | undefined; maxHermesVersion?: string | null | undefined; signatureKeyId?: string | undefined; signature?: string | undefined };
   let archiveBytes: () => Promise<Buffer>;
   if (isGzipUpload(c.req.header('content-type'))) {
     const query = new URL(c.req.url).searchParams;
@@ -485,6 +494,9 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   } catch (error) {
     throw new HTTPException(400, { message: error instanceof Error ? error.message : 'Invalid compatibility range' });
   }
+  if ((body.signature === undefined) !== (body.signatureKeyId === undefined)) throw new HTTPException(400, { message: 'signature and signatureKeyId go together' });
+  if (config.requireSignedReleases && body.signature === undefined) throw new HTTPException(400, { message: 'This registry accepts only publisher-signed releases' });
+  const signature: ReleaseSignature | null = body.signature === undefined ? null : { keyId: body.signatureKeyId!, value: body.signature };
   const archive = await archiveBytes();
   let persisted: { path: string; sha256: string };
   try {
@@ -492,6 +504,7 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   } catch (error) {
     throw new HTTPException(400, { message: error instanceof Error ? error.message : 'Invalid archive' });
   }
+  if (signature) assertSignature(skillId, version, persisted.sha256, signature, () => removeArchive(persisted.path));
   const release = {
     skillSlug: skillId,
     version,
@@ -504,12 +517,27 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
   };
   try {
     store.addRelease(release);
+    if (signature) store.setReleaseSignature(skillId, version, signature);
   } catch (error) {
     removeArchive(persisted.path);
     throw error;
   }
-  store.audit(c.get('auth').username, 'release.create', `${skillId}@${version}`, { sha256: persisted.sha256, minHermesVersion, maxHermesVersion });
-  return c.json(BrowserRelease.parse(release), 201);
+  store.audit(c.get('auth').username, 'release.create', `${skillId}@${version}`, { sha256: persisted.sha256, minHermesVersion, maxHermesVersion, ...(signature ? { signatureKeyId: signature.keyId } : {}) });
+  return c.json(BrowserRelease.parse({ ...release, signature }), 201);
+});
+
+// Attach (or, after a key rotation, replace) the publisher signature of an existing release. Bytes and
+// digest are unchanged; the signature must verify for exactly this release against a configured key.
+app.put('/admin/skills/:slug/releases/:version/signature', requireAuth(true), async (c) => {
+  const skillSlug = c.req.param('slug');
+  const version = c.req.param('version');
+  const release = store.getRelease(skillSlug, version);
+  if (!release) throw new HTTPException(404, { message: 'Release not found' });
+  const signature = browserInput(SetReleaseSignature, await requestJson(c));
+  assertSignature(skillSlug, version, release.sha256, signature);
+  store.setReleaseSignature(skillSlug, version, signature);
+  store.audit(c.get('auth').username, 'release.sign', `${skillSlug}@${version}`, { signatureKeyId: signature.keyId });
+  return c.json(signature);
 });
 
 // Deprecate or yank an immutable release: an advisory notice only. The release and its archive are

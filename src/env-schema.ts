@@ -24,6 +24,8 @@ export function envSchemaDocument(): unknown {
       { name: 'HIVE_SKILLS_MAGNUS_EXECUTOR_JSON', description: 'Optional verified HTTPS executor URL, optional caFile, and exactly one of a protected credentialFile (long-lived bearer) or oathweave {tokenUrl, clientId, clientSecretFile, audience, scope?} (short-lived client-credentials tokens). Enables approved Magnus jobs and disables legacy SSH execution.' },
       { name: 'HIVEXUI_URL', description: 'Optional absolute http(s) HiveXUI URL. When set, the retired web UI path / redirects there; otherwise it serves a page pointing to HiveXUI.' },
       { name: 'HIVE_SKILLS_TRUSTED_PROXIES', description: 'Optional comma-separated reverse-proxy IP addresses. From these peers the sign-in throttle takes the client address from X-Forwarded-For.' },
+      { name: 'HIVE_SKILLS_PUBLISHER_KEYS', description: 'Optional JSON array of publisher keys, [{"keyId","publicKey"}] with base64url raw Ed25519 public keys. Release signatures are verified against them at upload.' },
+      { name: 'HIVE_SKILLS_REQUIRE_SIGNED_RELEASES', default: 'false', description: 'When true, refuse release uploads without a valid publisher signature. Needs HIVE_SKILLS_PUBLISHER_KEYS.' },
       { name: 'HIVE_SKILLS_TARGETS', description: 'Optional initial deployment targets: name=user@host, comma-separated.' },
     ].map((entry) => ({ required: false, secret: false, ...entry })),
   };

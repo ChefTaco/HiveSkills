@@ -34,6 +34,7 @@ const ACTIONS: Record<string, Mapping> = {
   'release.create': { action: 'release.create', target: 'release', withId: true },
   'release.promote': { action: 'release.promote', target: 'skill', withId: true },
   'release.withdraw': { action: 'release.withdraw', target: 'skill', withId: true },
+  'release.sign': { action: 'release.sign', target: 'release', withId: true },
   'release.advisory': { action: 'release.advisory_set', target: 'release', withId: true },
   'release.advisory.clear': { action: 'release.advisory_clear', target: 'release', withId: true },
   'target.update': { action: 'target.update', target: 'target', withId: true },
