@@ -59,6 +59,9 @@ const deploymentEvent = (job: DeploymentRecord): HiveEvent | null => {
   return null;
 };
 
+const automaticTarget = (details: Record<string, unknown>): string => typeof details['target'] === 'string' ? ` (${details['target']})` : '';
+const failed = (details: Record<string, unknown>): string => typeof details['failedVersion'] === 'string' ? ` ${details['failedVersion']}` : '';
+
 const auditEvent = (entry: AuditRecord): HiveEvent | null => {
   const occurredAt = iso(entry.createdAt);
   if (!occurredAt) return null;
@@ -77,8 +80,10 @@ const auditEvent = (entry: AuditRecord): HiveEvent | null => {
       return event({ ...base, type: 'skill.release.published', severity: 'info', title: `Skill ${skill}${released ? ` ${released}` : ''} published`, summary: `An immutable release of skill ${skill} was stored. It reaches agents only after promotion to a channel.` });
     }
     case 'release.promote':
-      return event({ ...base, type: 'skill.release.promoted', severity: 'info', title: `Skill ${entry.subject}${version ? ` ${version}` : ''} promoted${channel ? ` to ${channel}` : ''}`, summary: `Enrolled targets${channel ? ` on the ${channel} channel` : ''} receive this release of skill ${entry.subject} on their next sync.` });
+      if (details['automatic'] === 'rollback') return event({ ...base, type: 'skill.release.promoted', severity: 'warning', title: `Skill ${entry.subject} canary rolled back${version ? ` to ${version}` : ''}`, summary: `A canary target${automaticTarget(details)} failed to restart with ${entry.subject}${failed(details)}, so the canary channel was put back on the stable release automatically.` });
+      return event({ ...base, type: 'skill.release.promoted', severity: 'info', title: `Skill ${entry.subject}${version ? ` ${version}` : ''} promoted${channel ? ` to ${channel}` : ''}${details['automatic'] ? ' automatically' : ''}`, summary: `Enrolled targets${channel ? ` on the ${channel} channel` : ''} receive this release of skill ${entry.subject} on their next sync.${details['automatic'] === 'canary_healthy' && typeof details['healthyTargets'] === 'number' ? ` ${details['healthyTargets']} canary targets reported it healthy.` : ''}` });
     case 'release.withdraw':
+      if (details['automatic'] === 'rollback') return event({ ...base, type: 'skill.release.withdrawn', severity: 'warning', title: `Skill ${entry.subject} withdrawn from canary automatically`, summary: `A canary target${automaticTarget(details)} failed to restart with ${entry.subject}${failed(details)} and stable has no release to fall back to, so canary targets stop receiving it.` });
       return event({ ...base, type: 'skill.release.withdrawn', severity: 'warning', title: `Skill ${entry.subject} withdrawn${channel ? ` from ${channel}` : ''}`, summary: `Skill ${entry.subject} no longer has a release${channel ? ` on the ${channel} channel` : ''}, so targets stop receiving it.` });
     case 'skill.delete':
       return event({ ...base, type: 'skill.deleted', severity: 'warning', title: `Skill ${entry.subject} deleted`, summary: `Skill ${entry.subject} and its releases were removed from the registry.` });
