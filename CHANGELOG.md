@@ -19,9 +19,19 @@
 - Archive downloads are streamed from the file instead of read into memory, with `Content-Length`. The digest check still runs before any byte is sent, but it is hashed in chunks without blocking other requests and cached by file size, mtime and inode, so an unchanged archive is hashed once rather than on every download.
 - `GET /health/ready` and `GET /healthz` share one readiness run (which checks every promoted archive) for 5 seconds instead of repeating it on every probe. A database failure is never cached.
 
+- The frozen Hive 1.2.2 bundle manifest (`hiveRelease` in `package.json`, which still named the retired `hive-router` and `hive-iam-server`) is gone. `migrate` builds HiveSkills' own release record in code with the same skills migration list, so the schema checksum and every installation's recorded state stay current. `GET /health/live` and `GET /healthz` now report `release` as the package version instead of `1.2.2`, and `GET /admin/updates` (with `HIVE_UPDATE_CHECK=true`) reasons about the installed package version.
+- Require `@hivemagnus/hive-common` 0.6.1 (was 0.5.0). Its ReDoS fixes are not reachable here (`health.ready()` is called directly); this keeps the suite on one tested version.
+- CI runs the gates on Node 24.22.3 and 26.13.1 (the image's runtime), builds the image and opens a database with the image's Node, and every third-party Action in CI and the release workflow is pinned by commit SHA.
+- The two Node-version-dependent script tests no longer fail with assertion noise on an unsupported local Node: one passes the tested Node version explicitly, the other is skipped with a message naming the local version and the required range.
+
+### Fixed
+
+- README: SQLite is a native add-on (`@photostructure/sqlite` prebuilds), not built into Node, and the stale "Hive 3.12.3 pins HiveSkills 1.8.1" sentence is replaced by a pointer to the signed suite release manifest.
+
 ### Upgrade notes
 
 - A client that sends a JSON body over 64 KiB to a route other than a release upload or a receipt now gets `413`. No HiveSkills route needs one.
+- Probes or scripts that compared `release` in `/health/live` or `/healthz` with `1.2.2` now see the package version (for example `1.9.1`).
 - A registry that receives PAM sign-ins through a reverse proxy sees every client at the proxy's address, so 10 failed sign-ins from anyone would make every sign-in through it wait up to 5 minutes. Set `HIVE_SKILLS_TRUSTED_PROXIES` to the proxy's IP. Oathweave bearer sign-in (suite installations) is not throttled and unaffected.
 
 ## [1.9.1] - 2026-11-24

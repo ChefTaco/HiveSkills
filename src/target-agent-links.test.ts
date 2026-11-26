@@ -60,11 +60,13 @@ test('managed-format-3 adds target agent links without changing released target 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('the release manifest pins the managed-format-3 checksum', () => {
-  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { hiveRelease: { migrations: Array<{ component: string; id: string; checksum: string }> } };
-  const entry = pkg.hiveRelease.migrations.find((m) => m.component === 'skills' && m.id === 'managed-format-3');
-  const source = readFileSync(new URL('../src/migrations/managed-format-3.ts', import.meta.url));
-  assert.equal(entry?.checksum, createHash('sha256').update(source).digest('hex'));
+test('the release record pins each migration module checksum', async () => {
+  const { SKILLS_MIGRATIONS } = await import('./upgrade.js');
+  for (const id of ['managed-format-1', 'managed-format-2', 'managed-format-3']) {
+    const entry = SKILLS_MIGRATIONS.find((m) => m.component === 'skills' && m.id === id);
+    const source = readFileSync(new URL(`../src/migrations/${id}.ts`, import.meta.url));
+    assert.equal(entry?.checksum, createHash('sha256').update(source).digest('hex'), id);
+  }
 });
 
 test('unbound targets and unfiltered listings keep the legacy response', async () => {

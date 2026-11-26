@@ -395,7 +395,8 @@ app.get('/admin/audit', requireAuth(true), (c) => {
   if(!Number.isSafeInteger(limit)||limit<1||limit>100||!Number.isSafeInteger(before)||before<1)throw new HTTPException(400,{message:'Invalid audit page'});
   return c.json(store.listAudit(limit,before));
 });
-app.get('/admin/updates', requireAuth(true), async (c) => c.json(await updateStatus(metadata(releasePackageRoot).release, upgradeHome())));
+// Update notices reason about this package's own version (the frozen Hive 1.2.2 manifest is gone).
+app.get('/admin/updates', requireAuth(true), async (c) => c.json(await updateStatus(serviceMetadata.version, upgradeHome())));
 
 app.post('/admin/skills', requireAuth(true), async (c) => {
   const body = browserInput(CreateSkill, await requestJson(c));

@@ -8,15 +8,21 @@ permissions:
   contents: read
 jobs:
   verify:
+    # The build stage and native deployments use Node 24; the image runs Node 26.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.22.3', '26.13.1']
+    name: verify (Node ${{ matrix.node }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.3
+          node-version: ${{ matrix.node }}
       - run: sudo apt-get update -qq && sudo apt-get install -y ripgrep
       - run: npm run bootstrap
       - run: npm run typecheck
@@ -26,3 +32,20 @@ jobs:
       - run: npm run check:browser
       - run: npm run scan:secrets
       - run: npm run check:private
+  image:
+    # Build the image as the release does and load the native SQLite module with the image's own Node.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build --tag hiveskills:ci .
+      - name: Open a database with the runtime Node
+        run: |
+          docker run --rm --entrypoint node hiveskills:ci --input-type=module -e "
+            const { DatabaseSync } = await import('/app/dist/sqlite.js');
+            const db = new DatabaseSync(':memory:');
+            console.log('node', process.versions.node, 'sqlite', db.prepare('SELECT sqlite_version() AS v').get().v);
+          "
+      - run: docker run --rm --entrypoint node hiveskills:ci /app/dist/cli.js --version
