@@ -322,9 +322,18 @@ in `/data`; mount only product-owned protected configuration in `/config`.
 ### Approved deployments through Magnus
 
 Suite browser deployments require `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` with a verified
-HTTPS `url`, a protected `credentialFile`, and optional `caFile`. The credential is
-a dedicated endpoint-scoped grant configured in Magnus; it cannot run arbitrary
-commands or administer the fleet. Each logical registry target must be explicitly
+HTTPS `url`, optional `caFile`, and exactly one way to authenticate:
+
+- `credentialFile`: a protected file (owned by the service user, mode 0600) holding a
+  long-lived bearer, a dedicated endpoint-scoped grant configured in Magnus; it cannot run
+  arbitrary commands or administer the fleet.
+- `oathweave`: `{ "tokenUrl", "clientId", "clientSecretFile", "audience", "scope"? }`, this
+  registry's own Oathweave client. HiveSkills then sends short-lived `client_credentials` tokens
+  bound to `audience`, cached and refreshed before they expire, and after a `401` it fetches a
+  new token and retries once. The executor must accept Oathweave service tokens for that
+  audience. The client secret file has the same protection rules and is read at first use.
+
+A job whose credential cannot be obtained is marked failed without being dispatched. Each logical registry target must be explicitly
 mapped to an enrolled Magnus node and a configured native agent target. Host-native
 credential files and the pinned HiveSkills sync client are installed by the host
 installer, independently of the application container.
