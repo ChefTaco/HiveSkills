@@ -140,7 +140,8 @@ test('a stored archive that no longer matches its digest is refused', async () =
   const response = await archive('1.2.0', '', admin);
   assert.equal(response.status, 500);
   assert.equal(response.headers.get('x-content-sha256'), null);
-  assert.deepEqual(await response.json(), { error: 'Release archive failed its digest check' });
+  const failed = await response.json() as { error: { code: string; message: string } };
+  assert.deepEqual([failed.error.code, failed.error.message], ['archive_digest_mismatch', 'Release archive failed its digest check']);
   // The metadata keeps reporting the immutable digest that was published.
   const body = await (await metadata('1.2.0', '', admin)).json() as { sha256: string };
   assert.equal(body.sha256, digest(archives['pinned-example@1.2.0']!));

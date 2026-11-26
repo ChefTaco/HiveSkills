@@ -197,7 +197,7 @@ test('registry identity claims keep their historical requirements', async () => 
   // Any verifier refusal, including an unknown signing key, keeps the registry's 401 body.
   const unknownKey = await app.request('/admin/skills', { headers: { Authorization: 'Bearer ' + (await token(undefined, undefined, undefined, {}, 'rotated')) } });
   assert.equal(unknownKey.status, 401);
-  assert.deepEqual(await unknownKey.json(), { error: 'Invalid or revoked identity session' });
+  assert.equal((await unknownKey.json() as { error: { message: string } }).error.message, 'Invalid or revoked identity session');
 });
 
 test('an unreachable key set refuses access', async () => {

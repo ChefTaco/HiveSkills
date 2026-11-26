@@ -22,10 +22,11 @@ import { config } from './config.js';
 import { persistArchive, assertSkillId, removeArchive } from './archive.js';
 import { authenticateOsUser, createSession, readAuth, removeSession, sessionCookie, validUsername } from './auth.js';
 import { store, deploymentJournal } from './db.js';
-import { requireMagnusExecutor, executeMagnusJob, magnusExecutorConfiguration } from './magnus-deployment.js';
+import { requireMagnusExecutor, executeMagnusJob, journalStatus, magnusExecutorConfiguration } from './magnus-deployment.js';
 import { type Publication } from './deployment-journal.js';
 import { z } from 'zod';
 import { hiveXuiStubResponse } from './hivexui-stub.js';
+import { HiveError, errorJson, onError, rateLimited } from './errors.js';
 import type { AuthContext, Release, TargetBinding } from './types.js';
 import { compareVersions, parseVersion } from './compatibility.js';
 import { archiveDigest } from './archive-digest.js';
@@ -85,7 +86,18 @@ const requireAuth = (admin = false): MiddlewareHandler<{ Variables: Variables }>
     try {username=linkedLocalId(accountLinks,identity);} catch {throw new HTTPException(403,{message:'An explicit registry account link is required'});}
     const isAdmin=config.adminUsers.has(username);
     if(admin && !isAdmin)throw new HTTPException(403,{message:'Local administrator access is required'});
-    if(c.req.method!=='GET' && c.req.path.startsWith('/admin/deployments')){if(!magnusExecutorConfiguration()){c.res=c.json({error:'DEPLOYMENT_ADAPTER_UNAVAILABLE',message:'Skill execution requires the Magnus job adapter'},503);return;}if(c.req.path.endsWith('/approve')&&(identity.authTime===undefined||Date.now()-identity.authTime*1000>300_000||identity.authTime*1000>Date.now()+30_000))throw new HTTPException(403,{message:'Recent Oathweave authentication is required for exact one-use deployment approval'});}
+    // Browser deployment writes need the Magnus job adapter, and an approval needs a sign-in from
+    // the last five minutes (with up to 30 seconds of clock skew into the future).
+    if (c.req.method !== 'GET' && c.req.path.startsWith('/admin/deployments')) {
+      if (!magnusExecutorConfiguration()) {
+        throw new HiveError('deployment_adapter_unavailable', 'Skill execution requires the Magnus job adapter', { status: 503 });
+      }
+      if (c.req.path.endsWith('/approve')) {
+        const authenticatedAt = identity.authTime === undefined ? undefined : identity.authTime * 1000;
+        const recent = authenticatedAt !== undefined && Date.now() - authenticatedAt <= 300_000 && authenticatedAt <= Date.now() + 30_000;
+        if (!recent) throw new HTTPException(403, { message: 'Recent Oathweave authentication is required for exact one-use deployment approval' });
+      }
+    }
     c.set('auth',{username,isAdmin});
     await next(); return;
   }
@@ -133,7 +145,10 @@ const archiveUrl = (skillSlug: string, release: Release, channel: string): strin
 
 // Echo or assign x-request-id (and W3C trace context) on every response, maintenance included.
 app.use('*', requestContext());
-app.use('*', async (c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();});
+app.use('*', async (c, next) => {
+  if (maintenanceActive(new URL(c.req.url).pathname)) return errorJson(c, 503, 'Hive is undergoing maintenance', 'maintenance');
+  await next();
+});
 // Request body limits. Only a release upload carries an archive; every other body, including the
 // unauthenticated sign-in, is small. The limit holds while the body streams, without a
 // Content-Length and against a wrong one.
@@ -143,7 +158,7 @@ export const MAX_RECEIPT_BODY_BYTES = 256 * 1024;
 /** A 50 MiB archive in base64 plus the release fields. */
 export const MAX_UPLOAD_JSON_BYTES = 70 * 1024 * 1024;
 export const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
-const tooLarge = (c: Context) => c.json({ error: 'Request body is too large' }, 413);
+const tooLarge = (c: Context) => errorJson(c, 413, 'Request body is too large');
 const limits = {
   json: bodyLimit({ maxSize: MAX_JSON_BODY_BYTES, onError: tooLarge }),
   receipt: bodyLimit({ maxSize: MAX_RECEIPT_BODY_BYTES, onError: tooLarge }),
@@ -298,7 +313,7 @@ const archiveResponse = async (c: Context<{ Variables: Variables }>, release: Re
     if (!stat.isFile()) throw new HTTPException(404, { message: 'Release archive not found' });
     if (await archiveDigest(release.archivePath, handle, stat) !== release.sha256) {
       console.error(`archive digest mismatch: ${release.skillSlug}@${release.version}`);
-      return c.json({ error: 'Release archive failed its digest check' }, 500);
+      return errorJson(c, 500, 'Release archive failed its digest check', 'archive_digest_mismatch');
     }
     c.header('Content-Type', 'application/gzip');
     c.header('Content-Length', String(stat.size));
@@ -364,7 +379,7 @@ app.post('/auth/login', async (c) => {
   if (refusal) {
     // Audited once per delay or window, so a flood of refused attempts cannot flood the audit log.
     if (refusal.first) store.audit(username, 'login.failed', 'session', { username, source, throttled: true, throttle: refusal.reason, retryAfterSeconds: refusal.retryAfterSeconds });
-    throw new HTTPException(429, { message: 'Try again shortly', res: new Response(null, { headers: { 'retry-after': String(refusal.retryAfterSeconds) } }) });
+    throw rateLimited(refusal.retryAfterSeconds);
   }
   if (!await authenticateOsUser(username, password)) {
     const state = loginThrottle.failed(username, source);
@@ -602,43 +617,88 @@ app.post('/admin/targets/:target/enroll', requireAuth(true), async (c) => {
   return c.json({ target, token, oneTime: true }, 201);
 });
 
-app.get('/admin/deployments/capabilities',requireAuth(true),c=>c.json({enabled:Boolean(magnusExecutorConfiguration()),executor:'magnus',message:magnusExecutorConfiguration()?'Exact publication previews and one-use approvals are available':'Configure the Magnus executor and native target client before deployment'}));
+app.get('/admin/deployments/capabilities', requireAuth(true), (c) => {
+  const enabled = Boolean(magnusExecutorConfiguration());
+  return c.json({
+    enabled,
+    executor: 'magnus',
+    message: enabled
+      ? 'Exact publication previews and one-use approvals are available'
+      : 'Configure the Magnus executor and native target client before deployment',
+  });
+});
 app.get('/admin/deployments', requireAuth(true), (c) => c.json(store.listDeployments()));
 
 app.post('/admin/deployments/:target', requireAuth(true), (c) => {
   const target = store.getTarget(c.req.param('target'));
   if (!target) throw new HTTPException(404, { message: 'Deployment target not found or disabled' });
+  const actor = c.get('auth').username;
   // Suite deployments always use the owned, approved Magnus operation. The
   // standalone native console retains its historical recovery route when unset.
-  if(process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON){
+  if (process.env.HIVE_SKILLS_MAGNUS_EXECUTOR_JSON) {
     requireMagnusExecutor();
-    const policy=store.targetPolicy(target.name);if(!policy)throw new HTTPException(409,{message:'Enroll the native target before preparing its deployment'});
-    const manifest:Publication={schemaVersion:1,channel:policy.channel,skills:store.activeManifest(policy.channel,policy.skills,undefined,false).map(({release,...skill})=>({slug:skill.slug,name:skill.name,version:release.version,sha256:release.sha256,compatibility:{minHermesVersion:release.minHermesVersion??null,maxHermesVersion:release.maxHermesVersion??null},archiveUrl:archiveUrl(skill.slug,release,policy.channel)}))};
-    const job=deploymentJournal.preview(target.name,c.get('auth').username,manifest);
-    store.audit(c.get('auth').username,'deployment.prepared',target.name,{id:job.id,publicationSha256:job.publication_sha256});c.header('Cache-Control','no-store');return c.json(job,201);
+    const policy = store.targetPolicy(target.name);
+    if (!policy) throw new HTTPException(409, { message: 'Enroll the native target before preparing its deployment' });
+    // The exact publication the approver sees and Magnus executes: the target's channel and allowlist,
+    // without Hermes-version filtering (the bridge checks compatibility on the host).
+    const manifest: Publication = {
+      schemaVersion: 1,
+      channel: policy.channel,
+      skills: store.activeManifest(policy.channel, policy.skills, undefined, false).map(({ release, ...skill }) => ({
+        slug: skill.slug,
+        name: skill.name,
+        version: release.version,
+        sha256: release.sha256,
+        compatibility: { minHermesVersion: release.minHermesVersion ?? null, maxHermesVersion: release.maxHermesVersion ?? null },
+        archiveUrl: archiveUrl(skill.slug, release, policy.channel),
+      })),
+    };
+    const job = deploymentJournal.preview(target.name, actor, manifest);
+    store.audit(actor, 'deployment.prepared', target.name, { id: job.id, publicationSha256: job.publication_sha256 });
+    c.header('Cache-Control', 'no-store');
+    return c.json(job, 201);
   }
-  const id = store.createDeployment(target.name, c.get('auth').username);
-  store.audit(c.get('auth').username, 'deployment.queued', target.name, { id });
+  const id = store.createDeployment(target.name, actor);
+  store.audit(actor, 'deployment.queued', target.name, { id });
   return c.json({ id, status: 'queued', target: target.name }, 202);
 });
 
-app.get('/admin/deployments/jobs/:id',requireAuth(true),c=>{c.header('Cache-Control','no-store');return c.json(deploymentJournal.get(c.req.param('id')))});
-app.post('/admin/deployments/jobs/:id/approve',requireAuth(true),async c=>{
- const parsed=z.object({publicationSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict().safeParse(await c.req.json().catch(()=>null));if(!parsed.success)throw new HTTPException(400,{message:'Exact publication digest is required'});
- requireMagnusExecutor();if(!store.getTarget(String(deploymentJournal.get(c.req.param('id')).target)))throw new HTTPException(409,{message:'Target was disabled before approval'});const job=deploymentJournal.approve(c.req.param('id'),c.get('auth').username,parsed.data.publicationSha256);store.audit(c.get('auth').username,'deployment.approved',String(job.target),{id:job.id,publicationSha256:job.publication_sha256});return c.json(job,202);
-});
-app.post('/admin/deployments/jobs/:id/reconcile',requireAuth(true),async c=>{
- requireMagnusExecutor();const id=c.req.param('id'),job=deploymentJournal.get(id);if(!['running','unknown'].includes(String(job.status)))throw new HTTPException(409,{message:'Only an existing uncertain dispatch can be reconciled'});
- const reply=await executeMagnusJob(id,true);deploymentJournal.outcome(id,reply.status==='running'?'unknown':reply.status==='not_admitted'?'failed':reply.status,reply.result,reply.jobId);store.audit(c.get('auth').username,'deployment.reconciled',String(job.target),{id,status:reply.status});return c.json(deploymentJournal.get(id));
+app.get('/admin/deployments/jobs/:id', requireAuth(true), (c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.json(deploymentJournal.get(c.req.param('id')));
 });
 
-app.onError((error, c) => {
-  const status = error instanceof HTTPException ? error.status : 500;
-  if (status === 500) console.error(error);
-  const response = c.json({ error: status >= 500 ? 'Internal server error' : error.message }, status);
-  const retryAfter = error instanceof HTTPException ? error.res?.headers.get('retry-after') : null;
-  if (retryAfter) response.headers.set('retry-after', retryAfter);
-  return response;
+const DeploymentApprovalBody = z.object({ publicationSha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+
+// One-use approval of the exact publication the approver previewed (same actor, same digest, before
+// it expires). The worker dispatches it to Magnus afterwards.
+app.post('/admin/deployments/jobs/:id/approve', requireAuth(true), async (c) => {
+  const parsed = DeploymentApprovalBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) throw new HTTPException(400, { message: 'Exact publication digest is required' });
+  requireMagnusExecutor();
+  const id = c.req.param('id');
+  const actor = c.get('auth').username;
+  if (!store.getTarget(String(deploymentJournal.get(id).target))) throw new HTTPException(409, { message: 'Target was disabled before approval' });
+  const job = deploymentJournal.approve(id, actor, parsed.data.publicationSha256);
+  store.audit(actor, 'deployment.approved', String(job.target), { id: job.id, publicationSha256: job.publication_sha256 });
+  return c.json(job, 202);
 });
+
+// Ask Magnus for the outcome of a dispatch whose result is uncertain, without replaying it.
+app.post('/admin/deployments/jobs/:id/reconcile', requireAuth(true), async (c) => {
+  requireMagnusExecutor();
+  const id = c.req.param('id');
+  const job = deploymentJournal.get(id);
+  if (!['running', 'unknown'].includes(String(job.status))) {
+    throw new HTTPException(409, { message: 'Only an existing uncertain dispatch can be reconciled' });
+  }
+  const reply = await executeMagnusJob(id, true);
+  deploymentJournal.outcome(id, journalStatus(reply.status), reply.result, reply.jobId);
+  store.audit(c.get('auth').username, 'deployment.reconciled', String(job.target), { id, status: reply.status });
+  return c.json(deploymentJournal.get(id));
+});
+
+// Errors use the suite envelope: { error: { code, message, requestId } }.
+app.onError(onError);
 
 export default app;

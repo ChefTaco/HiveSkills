@@ -27,13 +27,18 @@ const legacyTargets = [
   { name: 'agent-1', host: 'agent-host.test', username: 'deploy', enabled: true },
   { name: 'agent-2', host: 'other-host.test', username: 'deploy', enabled: true },
 ];
+// Error answers are envelopes; these tests compare only their message.
+const errorMessage = (body: unknown): unknown => {
+  const error = (body as { error?: { message?: unknown } } | null)?.error;
+  return error && typeof error === 'object' ? { error: error.message } : body;
+};
 const get = async (path: string) => {
   const response = await app.request(url + path, { headers: { cookie } });
-  return { status: response.status, body: await response.json() as unknown };
+  return { status: response.status, body: errorMessage(await response.json()) };
 };
 const put = async (target: string, body: Record<string, unknown>) => {
   const response = await app.request(`${url}/admin/targets/${target}`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  return { status: response.status, body: await response.json() as unknown };
+  return { status: response.status, body: errorMessage(await response.json()) };
 };
 const base = { host: 'agent-host.test', username: 'deploy' };
 

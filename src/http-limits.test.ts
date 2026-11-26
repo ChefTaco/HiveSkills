@@ -59,7 +59,7 @@ test('the anonymous sign-in refuses a large body before parsing it', async () =>
   const big = JSON.stringify({ username: 'fixture-user', password: 'x', padding: 'y'.repeat(appModule.MAX_JSON_BODY_BYTES) });
   const declared = await app.request(url('/auth/login'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: big });
   assert.equal(declared.status, 413);
-  assert.deepEqual(await declared.json(), { error: 'Request body is too large' });
+  assert.deepEqual((await declared.json() as { error: { code: string; message: string } }).error.code, 'too_large');
   // Without a Content-Length the limit holds while the body streams.
   assert.equal((await app.fetch(chunked('/auth/login', appModule.MAX_JSON_BODY_BYTES + 1))).status, 413);
   // A body within the limit still reaches the handler.
@@ -138,7 +138,7 @@ test('archives stream with their length and are hashed again only when the file 
   utimesSync(archivePath, new Date(), new Date(Date.now() + 60_000));
   const tampered = await download();
   assert.equal(tampered.status, 500);
-  assert.deepEqual(await tampered.json(), { error: 'Release archive failed its digest check' });
+  assert.equal((await tampered.json() as { error: { code: string } }).error.code, 'archive_digest_mismatch');
   rmSync(archivePath);
   assert.equal((await download()).status, 404);
 });
