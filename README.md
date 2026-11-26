@@ -25,8 +25,8 @@ Since 1.3, HiveSkills ships only as a container image, `ghcr.io/cheftaco/hiveski
 [Hive suite controller](https://github.com/ChefTaco/hive#install-the-suite), in both the
 `core` and `full` profiles. The controller pins the image by digest from a signed release
 manifest and writes its configuration, secrets and TLS. In the suite, administrators sign in
-through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). Use a current signed suite release for the reviewed product and datastore pins; Hive 3.12.3 pins
-HiveSkills 1.8.1.
+through Oathweave from HiveXUI ([direct browser authorization](docs/OATHWEAVE.md)). The signed suite release manifest names the HiveSkills image the
+suite pins; this README does not repeat it, so it cannot go stale.
 
 **Legacy npm packages.** HiveSkills 1.3 and later are not published on npm. The npm package
 `@hivemagnus/hive-skills` (the name this source still uses), the `@hivemagnus/hive` launcher's
@@ -87,8 +87,9 @@ replaces existing records. Run `hive-skills migrate` explicitly before first sta
 `HIVE_AUTO_MIGRATE=true` with backup access.
 
 Outside a container, the server needs Linux, Node.js 24.22.3+ or 26.13.1+, TLS certificates,
-and `pamtester` for OS-backed sign-in. SQLite is provided by Node; there are no native npm
-add-ons. Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user
+and `pamtester` for OS-backed sign-in. SQLite comes from `@photostructure/sqlite`, a native
+add-on that ships prebuilt binaries for Linux (glibc and musl, x64 and arm64) and loads them with
+Node-API, so `npm ci` needs no compiler and one build runs on both Node 24 and Node 26. Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user
 timer.
 
 Configure these values in a private environment file (mode 0600):

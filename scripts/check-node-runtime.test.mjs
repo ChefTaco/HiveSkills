@@ -7,6 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { assertNodeVersion, packageNodeRange } from './check-node-runtime.mjs';
 
 const range = packageNodeRange();
+// The deployment script checks the local Node before anything else, so its test needs a supported one.
+let localNode;
+try { assertNodeVersion(process.versions.node, range); } catch { localNode = `local Node.js ${process.versions.node} is outside the package engines (${range}); the deployment script refuses it before the step under test`; }
 test('native deployment follows package engines and rejects vulnerable or unsupported Node', () => {
   for (const version of ['24.22.3', '24.23.0', '26.13.1', '26.14.0']) assert.doesNotThrow(() => assertNodeVersion(version, range));
   for (const version of ['22.23.5', '24.22.0', '24.22.1', '24.22.2', '25.0.0', '26.13.0', '27.0.0', '24.22.3-rc.1', '24.022.3']) {
@@ -32,7 +35,7 @@ test('streamed SSH preflight fails closed before a following deployment mutation
   }
 });
 
-test('the native deployment rejects an unsupported host before any install or activation', () => {
+test('the native deployment rejects an unsupported host before any install or activation', { skip: localNode }, () => {
   for (const reject of ['path', 'service']) {
     const temporary = mkdtempSync(join(tmpdir(), 'native-node-preflight-'));
     try {
