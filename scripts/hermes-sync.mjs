@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { boundedResponse, extractArchive, MAX_ARCHIVE_BYTES } from './archive-utils.mjs';
+import { boundedResponse, extractArchive, MAX_ARCHIVE_BYTES, parsePublisherKeys, verifyReleaseSignature } from './archive-utils.mjs';
 
 const safeSlug = (value) => typeof value === 'string' && /^[a-z0-9][a-z0-9-]{1,62}$/.test(value);
 const versionParts = (value) => { const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/.exec(String(value)); return match ? match.slice(1).map(Number) : null; };
@@ -24,7 +24,7 @@ function atomicJson(path, value) {
   const directory = openSync(dirname(path), 'r'); try { fsyncSync(directory); } finally { closeSync(directory); }
 }
 
-export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => {
+export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => {
   const result = spawnSync('/usr/bin/systemctl', ['--user', 'try-restart', 'hermes-gateway.service'], { timeout: 30_000 });
   if (result.status !== 0) throw new Error('Hermes gateway restart failed');
 } }) {
@@ -92,12 +92,26 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
       if (archiveUrl.href !== expected.href) throw new Error('Unexpected archive origin or path');
       desired.add(skill.slug);
     }
+    const needsInstall = (skill) => !(prior.skills?.[skill.slug]?.sha256 === skill.sha256 && existsSync(resolve(root, skill.slug, 'SKILL.md')));
+    // With pinned publisher keys, every release about to be installed must carry a valid signature
+    // from one of them. All are checked before anything is activated, so a registry or an
+    // administrator session cannot push code the publisher did not sign.
+    if (publisherKeys.size) {
+      if (!target || !token) throw new Error('Pinned publisher keys need an enrolled target to read release signatures');
+      for (const skill of manifest.skills.filter(needsInstall)) {
+        const url = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}`);
+        url.searchParams.set('target', target);
+        const metadata = JSON.parse((await boundedResponse(await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 64 * 1024)).toString('utf8'));
+        if (metadata.slug !== skill.slug || metadata.version !== skill.version || metadata.sha256 !== skill.sha256) throw new Error(`Release metadata for ${skill.slug} differs from the manifest`);
+        if (!verifyReleaseSignature(publisherKeys, skill, metadata.signature)) throw new Error(`Skill ${skill.slug} ${skill.version} has no valid signature from a pinned publisher key`);
+      }
+    }
     const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true };
     let changed = false;
     for (const skill of manifest.skills) {
       const destination = resolve(root, skill.slug);
       next.skills[skill.slug] = { version: skill.version, sha256: skill.sha256 };
-      if (prior.skills?.[skill.slug]?.sha256 === skill.sha256 && existsSync(resolve(destination, 'SKILL.md'))) continue;
+      if (!needsInstall(skill)) continue;
       if (existsSync(destination) && !prior.skills?.[skill.slug]) throw new Error("Refusing to replace an unmanaged skill");
       const bytes = await boundedResponse(await fetchImpl(skill.archiveUrl, { redirect: 'error', signal: AbortSignal.timeout(60_000) }), MAX_ARCHIVE_BYTES);
       if (createHash('sha256').update(bytes).digest('hex') !== skill.sha256) throw new Error('Archive checksum mismatch');
@@ -138,5 +152,5 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined });
+  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined, publisherKeys: parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS) });
 }

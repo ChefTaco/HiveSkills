@@ -60,7 +60,7 @@ test('a data directory recorded before the advisory migration applies it', async
     try { await skillsMigration(['--plan']); } finally { console.log = log; }
     return JSON.parse(lines[0]!) as { pending: unknown[] };
   };
-  assert.equal((await plan()).pending.length, 1);
+  assert.equal((await plan()).pending.length, 1, 'one combined schema step');
   await skillsMigration([], true);
   assert.deepEqual((await plan()).pending, []);
 });

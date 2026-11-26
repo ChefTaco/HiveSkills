@@ -13,6 +13,8 @@ export const Skill = z.object({
 // An advisory notice on an immutable release. The release stays immutable and downloadable;
 // `yanked` additionally blocks new promotions. Pinned readers see it in the release metadata.
 export const ReleaseAdvisory = z.object({ level: z.enum(['deprecated', 'yanked']), reason: z.string(), since: z.string() }).strict();
+// A publisher's Ed25519 signature (base64url) of `hiveskills-release-signature-v1\n<slug>\n<version>\n<sha256>\n`.
+export const ReleaseSignature = z.object({ keyId: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/), value: z.string().regex(/^[A-Za-z0-9_-]{86}$/) }).strict();
 export const Release = z.object({
   skillSlug: z.string(),
   version: z.string(),
@@ -22,6 +24,7 @@ export const Release = z.object({
   maxHermesVersion: z.string().nullable().optional(),
   createdAt: z.string(),
   advisory: ReleaseAdvisory.nullable().optional(),
+  signature: ReleaseSignature.nullable().optional(),
 });
 // One immutable release by exact version (GET /v1/skills/:slug/releases/:version), promoted or not.
 // size is null when the stored archive is missing; channels lists where this version is promoted now.
@@ -36,6 +39,7 @@ export const PinnedRelease = z.object({
   archiveUrl: z.string(),
   createdAt: z.string(),
   advisory: ReleaseAdvisory.nullable(),
+  signature: ReleaseSignature.nullable(),
 }).strict();
 export const Channel = z.object({
   channel: z.enum(['stable', 'canary']),
@@ -100,7 +104,11 @@ export const UploadRelease = z.object({
   notes: optionalText(5000),
   minHermesVersion: optionalText(64),
   maxHermesVersion: optionalText(64),
+  // Both or neither: a publisher signature checked against HIVE_SKILLS_PUBLISHER_KEYS at upload.
+  signatureKeyId: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/).optional(),
+  signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/).optional(),
 });
+export const SetReleaseSignature = z.object({ keyId: ReleaseSignature.shape.keyId, value: ReleaseSignature.shape.value }).strict();
 export const SetReleaseAdvisory = z.object({ level: z.enum(['deprecated', 'yanked']), reason: requiredText(1000) }).strict();
 // A raw `application/gzip` release upload carries these fields in its query string.
 export const UploadArchiveQuery = UploadRelease.omit({ archiveBase64: true }).strict();
@@ -155,7 +163,7 @@ export const HiveAuditQuery = z.object({
   limit: z.coerce.number().int().min(1).optional(),
 });
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
-  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,PinnedRelease,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,UploadArchiveQuery,ReleaseAdvisory,SetReleaseAdvisory,EnrollTarget,EmptyResponse,
+  ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,PinnedRelease,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,UploadArchiveQuery,ReleaseAdvisory,SetReleaseAdvisory,ReleaseSignature,SetReleaseSignature,EnrollTarget,EmptyResponse,
   MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery,HiveAuditRecord,HiveAuditPage,HiveAuditQuery
 };
 
@@ -221,8 +229,12 @@ export const ReleaseAdvisorySchema=ReleaseAdvisory;
 export type ReleaseAdvisory=z.infer<typeof ReleaseAdvisory>;
 export const ReleaseListSchema=ReleaseList;
 export type ReleaseList=z.infer<typeof ReleaseList>;
+export const ReleaseSignatureSchema=ReleaseSignature;
+export type ReleaseSignature=z.infer<typeof ReleaseSignature>;
 export const SetReleaseAdvisorySchema=SetReleaseAdvisory;
 export type SetReleaseAdvisory=z.input<typeof SetReleaseAdvisory>;
+export const SetReleaseSignatureSchema=SetReleaseSignature;
+export type SetReleaseSignature=z.input<typeof SetReleaseSignature>;
 export const SkillSchema=Skill;
 export type Skill=z.infer<typeof Skill>;
 export const SkillListSchema=SkillList;

@@ -67,6 +67,7 @@ test('release metadata reports any immutable version with its digest, size, comp
     archiveUrl: 'https://skills.example.com/v1/skills/pinned-example/releases/1.1.0/archive',
     createdAt: store.getRelease('pinned-example', '1.1.0')!.createdAt,
     advisory: null,
+    signature: null,
   });
   const older = await metadata('1.0.0', asTarget('agent-1', scopedToken).query, asTarget('agent-1', scopedToken).headers);
   assert.equal(older.status, 200);

@@ -56,6 +56,14 @@ export const SKILLS_MIGRATIONS: Release['migrations'] = [
     readableBy: '^1.1.0',
     note: 'Add advisory deprecation and yank notices for immutable releases in a side table; release rows and older binaries are unaffected.',
   },
+  {
+    component: 'skills',
+    id: 'managed-format-5',
+    checksum: '4e2b7b91922a9a240e2e81820c897c60d6a8376553d70701a90737008e3cc7e8',
+    impact: 'fast',
+    readableBy: '^1.1.0',
+    note: 'Add publisher signatures of immutable releases in a side table; release rows and older binaries are unaffected.',
+  },
 ];
 /** The oldest HiveSkills whose code reads data written by this one. */
 export const SKILLS_DATA_COMPATIBILITY = '^1.1.0';
@@ -115,6 +123,7 @@ export async function skillsMigration(args: readonly string[], automatic = false
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='deployment_authorizations'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='target_agent_links'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_advisories'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_signatures'").get() ||
           !columns.has('min_hermes_version') ||
           !columns.has('max_hermes_version') ||
           !db.prepare("SELECT id FROM registry_migrations WHERE id='release-channels'").get(),

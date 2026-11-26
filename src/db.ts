@@ -7,7 +7,7 @@ import { compatibleVersion } from './compatibility.js';
 import type { HiveEventRecords } from './hive-events.js';
 import { EVENT_AUDIT_ACTIONS, EVENT_DEPLOYMENT_STATUSES } from './hive-events.js';
 import { TARGET_ACTIONS, type AuditExportRow } from './audit-export.js';
-import type { DeploymentTarget, ListedTarget, Release, ReleaseAdvisory, Session, Skill, TargetBinding } from './types.js';
+import type { DeploymentTarget, ListedTarget, Release, ReleaseAdvisory, ReleaseSignature, Session, Skill, TargetBinding } from './types.js';
 if (!existsSync(config.databasePath)) throw new Error('Skills database is missing; run hive-skills migrate before opening storage');
 const db = new DatabaseSync(config.databasePath, { enableForeignKeyConstraints: true });
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -72,9 +72,18 @@ export const store = {
   promoteRelease: (slug: string, version: string, channel: string): void => { db.prepare('INSERT INTO channel_releases VALUES (?,?,?) ON CONFLICT(channel,skill_slug) DO UPDATE SET version=excluded.version').run(channel, slug, version); },
   withdrawRelease: (slug: string, channel: string) => db.prepare('DELETE FROM channel_releases WHERE channel=? AND skill_slug=?').run(channel, slug),
   listChannels: () => db.prepare('SELECT * FROM channel_releases ORDER BY channel,skill_slug').all(),
-  listReleases: (slug: string): Array<Release & { advisory: ReleaseAdvisory | null }> => {
+  listReleases: (slug: string): Array<Release & { advisory: ReleaseAdvisory | null; signature: ReleaseSignature | null }> => {
     const advisories = new Map((db.prepare('SELECT version,level,reason,created_at FROM release_advisories WHERE skill_slug=?').all(slug) as AdvisoryRow[]).map((row) => [row.version, mapAdvisory(row)]));
-    return (db.prepare('SELECT * FROM releases WHERE skill_slug=? ORDER BY created_at DESC').all(slug) as ReleaseRow[]).map((row) => ({ ...mapRelease(row), advisory: advisories.get(row.version) ?? null }));
+    const signatures = new Map((db.prepare('SELECT version,key_id,signature FROM release_signatures WHERE skill_slug=?').all(slug) as Array<{ version: string; key_id: string; signature: string }>).map((row) => [row.version, { keyId: row.key_id, value: row.signature }]));
+    return (db.prepare('SELECT * FROM releases WHERE skill_slug=? ORDER BY created_at DESC').all(slug) as ReleaseRow[]).map((row) => ({ ...mapRelease(row), advisory: advisories.get(row.version) ?? null, signature: signatures.get(row.version) ?? null }));
+  },
+  releaseSignature: (slug: string, version: string): ReleaseSignature | null => {
+    const row = db.prepare('SELECT key_id,signature FROM release_signatures WHERE skill_slug=? AND version=?').get(slug, version) as { key_id: string; signature: string } | undefined;
+    return row ? { keyId: row.key_id, value: row.signature } : null;
+  },
+  /** Store a verified publisher signature; a new one (for example from a rotated key) replaces the old. */
+  setReleaseSignature: (slug: string, version: string, signature: ReleaseSignature): void => {
+    db.prepare('INSERT INTO release_signatures VALUES (?,?,?,?,?) ON CONFLICT(skill_slug,version) DO UPDATE SET key_id=excluded.key_id,signature=excluded.signature,created_at=excluded.created_at').run(slug, version, signature.keyId, signature.value, now());
   },
   releaseAdvisory: (slug: string, version: string): ReleaseAdvisory | null => {
     const row = db.prepare('SELECT version,level,reason,created_at FROM release_advisories WHERE skill_slug=? AND version=?').get(slug, version) as AdvisoryRow | undefined;

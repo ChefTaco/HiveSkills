@@ -5,6 +5,7 @@ import type { DeploymentTarget } from './types.js';
 import { bundledDeployScript } from './paths.js';
 import { parseHiveXuiUrl } from './hivexui-stub.js';
 import { parseTrustedProxies } from './login-throttle.js';
+import { parsePublisherKeys } from '../scripts/archive-utils.mjs';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -47,6 +48,10 @@ export function parseTargets(value: string | undefined): DeploymentTarget[] {
 export const publicUrlFrom = (value: string | undefined, listenPort: number): string =>
   (value?.trim() || `https://localhost:${listenPort}`).replace(/\/+$/, '');
 
+const publisherKeys = parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS);
+const requireSignedReleases = process.env.HIVE_SKILLS_REQUIRE_SIGNED_RELEASES === 'true';
+if (requireSignedReleases && publisherKeys.size === 0) throw new Error('HIVE_SKILLS_REQUIRE_SIGNED_RELEASES needs HIVE_SKILLS_PUBLISHER_KEYS');
+
 const adminUsers = new Set((process.env.HIVE_SKILLS_ADMIN_USERS ?? '').split(',').map((value) => value.trim()).filter(Boolean));
 if (adminUsers.size === 0) console.warn('HIVE_SKILLS_ADMIN_USERS is empty; no account can administer the registry.');
 
@@ -68,6 +73,10 @@ export const config = {
   hivexuiUrl: parseHiveXuiUrl(process.env.HIVEXUI_URL),
   /** Reverse proxies whose X-Forwarded-For names the client for the sign-in throttle. */
   trustedProxies: parseTrustedProxies(process.env.HIVE_SKILLS_TRUSTED_PROXIES),
+  /** Publisher Ed25519 keys release signatures are checked against, by key id. */
+  publisherKeys,
+  /** Refuse release uploads without a valid publisher signature. */
+  requireSignedReleases,
 } as const;
 
 export const requireProductionSecrets = (): void => {

@@ -22,6 +22,9 @@ export type Release = {
 /** An advisory notice on an immutable release: it stays downloadable, but readers are warned. */
 export type ReleaseAdvisory = { level: 'deprecated' | 'yanked'; reason: string; since: string };
 
+/** A publisher's Ed25519 signature of a release (see scripts/archive-utils.mjs). */
+export type ReleaseSignature = { keyId: string; value: string };
+
 export type Session = { id: string; username: string; expiresAt: string };
 export type DeploymentTarget = { name: string; host: string; username: string; enabled: boolean };
 /** Optional fleet binding; agent references use `<magnusNodeId>~<profile>`. */

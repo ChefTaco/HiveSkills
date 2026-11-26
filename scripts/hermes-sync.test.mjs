@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { readArchive, boundedResponse } from './archive-utils.mjs';
 import { syncSkills } from './hermes-sync.mjs';
+import { parsePublisherKeys } from './archive-utils.mjs';
+import { keygen, signRelease } from './sign-release.mjs';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'hive-skills-fixture-'));
@@ -121,4 +123,33 @@ test('frozen publications preserve current native target revocation and exact as
   await assert.rejects(syncSkills({...options,fetchImpl:async()=>Response.json({...frozenManifest,skills:[{slug:'changed'}]})}),/current authorized target assignment/);assert.ok(!existsSync(options.hermesHome));
   await syncSkills({...options,fetchImpl:async()=>Response.json({...frozenManifest,generatedAt:'ignored-publication-timestamp'})});assert.ok(existsSync(options.hermesHome));
  }finally{rmSync(f.root,{recursive:true,force:true})}
+});
+
+test('pinned publisher keys refuse an unsigned or foreign release before anything is activated', async () => {
+  const f = fixture();
+  try {
+    const bytes = f.pack();
+    const key = join(f.root, 'publisher.pem'), foreignKey = join(f.root, 'foreign.pem');
+    const publisherKeys = parsePublisherKeys(JSON.stringify([keygen({ out: key, keyId: 'example' })]));
+    keygen({ out: foreignKey, keyId: 'example' });
+    const entry = { slug: 'fixture', version: '1.0.0', sha256: createHash('sha256').update(bytes).digest('hex'), archiveUrl: 'https://registry.test/v1/skills/fixture/releases/1.0.0/archive' };
+    let signature = null; const requests = [];
+    const fetchImpl = async (url, init) => {
+      const path = new URL(url).pathname; requests.push(path);
+      if (path.endsWith('/manifest')) return Response.json({ schemaVersion: 1, skills: [entry] });
+      if (path === '/v1/skills/fixture/releases/1.0.0') { assert.equal(init.headers.authorization, 'Bearer target-token'); return Response.json({ slug: 'fixture', version: '1.0.0', sha256: entry.sha256, signature }); }
+      if (path.endsWith('/receipts/agent-1')) return Response.json({ ok: true });
+      return new Response(bytes);
+    };
+    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, target: 'agent-1', token: 'target-token', publisherKeys, restart: () => {} };
+    await assert.rejects(syncSkills(options), /no valid signature/);
+    signature = { keyId: 'example', value: signRelease({ key: foreignKey, keyId: 'example', slug: 'fixture', version: '1.0.0', sha256: entry.sha256 }).signature };
+    await assert.rejects(syncSkills(options), /no valid signature/);
+    assert.equal(requests.some((path) => path.endsWith('/archive')), false, 'no archive was downloaded');
+    assert.equal(existsSync(join(options.hermesHome, 'skills/registry/fixture')), false);
+    await assert.rejects(syncSkills({ ...options, target: undefined, token: undefined }), /enrolled target/);
+    signature = { keyId: 'example', value: signRelease({ key, keyId: 'example', slug: 'fixture', version: '1.0.0', sha256: entry.sha256 }).signature };
+    await syncSkills(options);
+    assert.ok(existsSync(join(options.hermesHome, 'skills/registry/fixture/SKILL.md')));
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
 });

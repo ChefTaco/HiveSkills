@@ -1,3 +1,4 @@
+import { createPublicKey, verify } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -67,4 +68,43 @@ export async function boundedResponse(response, limit) {
     }
   } finally { await reader.cancel(); }
   return Buffer.concat(chunks);
+}
+
+// Publisher-signed releases. A publisher signs (Ed25519) this exact message for each release, so a
+// registry or an administrator session cannot change what a pinned key vouches for. Shared by the
+// registry, which checks a signature at upload, and the bridge, which checks it before activation.
+const KEY_ID = /^[A-Za-z0-9._-]{1,64}$/;
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+export function releaseSigningMessage(slug, version, sha256) {
+  return Buffer.from(`hiveskills-release-signature-v1\n${slug}\n${version}\n${sha256}\n`, 'utf8');
+}
+
+/**
+ * Pinned publisher keys from JSON: `[{"keyId":"...","publicKey":"<base64url raw 32-byte Ed25519>"}]`.
+ * Empty or unset means no keys. Malformed input throws, so a typo never silently disables checks.
+ */
+export function parsePublisherKeys(value) {
+  const keys = new Map();
+  if (value === undefined || value === null || String(value).trim() === '') return keys;
+  let entries;
+  try { entries = JSON.parse(String(value)); } catch { throw new Error('Publisher keys must be a JSON array'); }
+  if (!Array.isArray(entries) || entries.length > 32) throw new Error('Publisher keys must be a JSON array of at most 32 keys');
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Object.keys(entry).sort().join(',') !== 'keyId,publicKey') throw new Error('Each publisher key needs exactly keyId and publicKey');
+    if (typeof entry.keyId !== 'string' || !KEY_ID.test(entry.keyId) || keys.has(entry.keyId)) throw new Error('Publisher key ids must be unique and match [A-Za-z0-9._-]{1,64}');
+    const raw = typeof entry.publicKey === 'string' && BASE64URL.test(entry.publicKey) ? Buffer.from(entry.publicKey, 'base64url') : Buffer.alloc(0);
+    if (raw.length !== 32) throw new Error(`Publisher key ${entry.keyId} must be a base64url raw 32-byte Ed25519 public key`);
+    keys.set(entry.keyId, createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: raw.toString('base64url') }, format: 'jwk' }));
+  }
+  return keys;
+}
+
+/** True when `signature` ({keyId, value}) is a valid signature of this release by a pinned key. */
+export function verifyReleaseSignature(keys, release, signature) {
+  if (!signature || typeof signature !== 'object' || typeof signature.keyId !== 'string' || typeof signature.value !== 'string') return false;
+  const key = keys.get(signature.keyId);
+  if (!key || !BASE64URL.test(signature.value)) return false;
+  const bytes = Buffer.from(signature.value, 'base64url');
+  if (bytes.length !== 64) return false;
+  try { return verify(null, releaseSigningMessage(release.slug, release.version, release.sha256), key, bytes); } catch { return false; }
 }
