@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-11-26
+
+Repository tooling only: the image's runtime code is unchanged from 1.11.0.
+
 ### Changed
 
 - Dependabot now opens one grouped weekly pull request (group `hivemagnus`) for `@hivemagnus/*` package updates, so suite package bumps arrive together. Repository configuration only; nothing to do when upgrading.
@@ -9,6 +13,14 @@
 ### Security
 
 - The repository privacy checks (`scripts/check-private-data.sh` and `scripts/scan-secrets.sh`) now report a finding as `path:line: rule` and never print the matching text or the line around it, so a failing check cannot copy a private term or a credential into a public CI log. A path that itself contains a private term is shown as `(path redacted)`. Exit codes are unchanged, and `scripts/privacy-output.test.sh` (run in CI) plants fake values and checks they stay out of the output. Repository tooling only; nothing to do when upgrading.
+
+### Migrations
+
+- None. The database schema is unchanged from 1.11.0 (`managed-format-5`), so a suite upgrade needs no `--allow-migrations` for HiveSkills and downgrading to 1.11.0 is safe.
+
+### Upgrade notes
+
+- Nothing to do: no new settings, and the Hermes bridge is unchanged from 1.11.0, so agent hosts need no redeploy.
 
 ## [1.11.0] - 2026-11-26
 
