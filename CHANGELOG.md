@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.11.0] - 2026-11-26
 
 ### Added
 
@@ -20,6 +20,18 @@
 
 - The sign-in throttle resolves the client address with HiveCommon `/rate-limit` (`resolveClientAddress()`, `addressKey()`) instead of its own `X-Forwarded-For` parser. Forwarded addresses with a port (`192.0.2.1:5678`, `[2001:db8::1]:443`) are now read as that client; previously they were invalid, so every client behind such a proxy shared the proxy's source budget. An IPv6 client is counted by its /64, so one host cannot get a fresh budget per address. The per-account delay table no longer refuses new accounts when full (previously a few sources, each within its own limit, could fill its 1000 slots and block every sign-in with `429`); it holds 10 000 and forgets the oldest delay. The `capacity` throttle reason is gone from `login.failed` audit rows.
 - A session id is re-keyed from the pre-hashing format only when it has the issued format (43 base64url characters), so a stored 64-hex session hash can never be presented as a session id.
+
+### Migrations
+
+- None. The database schema is unchanged from 1.10.0 (`managed-format-5`), so a suite upgrade needs no `--allow-migrations` for HiveSkills and downgrading to 1.10.0 is safe.
+
+### Upgrade notes
+
+- Redeploy the Hermes bridge to agent hosts (`scripts/deploy-hermes-agent.sh`). Until then hosts keep the 1.10.0 bridge: no `restart_failed` receipts (so `HIVE_SKILLS_CANARY_AUTO_ROLLBACK` never fires for them), no settle check and no check of skills installed before publisher keys were pinned.
+- A sync that restarts a running gateway takes about 10 seconds longer (the settle check, `HIVE_SKILLS_RESTART_SETTLE_MS`, default 10000).
+- Hosts that pin `HIVE_SKILLS_PUBLISHER_KEYS` make one metadata request per installed skill on the first sync after the upgrade and log every unsigned installed skill on each sync until it is signed or quarantined (`HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine`). With `quarantine` an unsigned installed skill is removed from the gateway and the sync fails.
+- A custom agent that sends `restart_failed` without `changed` no longer triggers an automatic rollback.
+- Behind a proxy that forwards addresses with a port, or for IPv6 clients, the sign-in throttle now counts per real client (IPv6 per /64) instead of sharing one budget; `HIVE_SKILLS_TRUSTED_PROXIES` may now use CIDR ranges and the `loopback`, `private` and `linklocal` presets. Audit consumers that matched the `capacity` throttle reason in `login.failed` rows no longer see it.
 
 ## [1.10.0] - 2026-11-26
 

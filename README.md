@@ -18,7 +18,7 @@ The registry is intentionally small and local-first. SQLite records skills, rele
 
 Since 1.3, HiveSkills ships only as a container image, `ghcr.io/cheftaco/hiveskills`, for
 `linux/amd64` and `linux/arm64`. Each release is tagged with its exact version (for example
-`1.10.0`; there is no `latest` tag), and its
+`1.11.0`; there is no `latest` tag), and its
 [GitHub release](https://github.com/ChefTaco/HiveSkills/releases) records the image digest.
 
 **With the Hive suite.** HiveSkills is normally installed by `hive.sh`, the
@@ -55,9 +55,9 @@ NODE_EXTRA_CA_CERTS=/config/tls/server.crt
 EOF
 
 docker run --rm -v hiveskills-data:/data -v "$PWD/tls:/config/tls:ro" \
-  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.10.0 check
+  --env-file skills.env ghcr.io/cheftaco/hiveskills:1.11.0 check
 docker run -d --name hiveskills -p 127.0.0.1:4030:4030 -v hiveskills-data:/data \
-  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.10.0
+  -v "$PWD/tls:/config/tls:ro" --env-file skills.env ghcr.io/cheftaco/hiveskills:1.11.0
 
 # Once it reports healthy
 curl --cacert tls/server.crt https://localhost:4030/healthz
