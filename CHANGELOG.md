@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.10.0] - 2026-11-26
 
 ### Added
 
@@ -48,7 +48,7 @@
 - A client that sends a JSON body over 64 KiB to a route other than a release upload or a receipt now gets `413`. No HiveSkills route needs one.
 - Pinning publisher keys on a host (bridge `HIVE_SKILLS_PUBLISHER_KEYS`) makes it refuse every unsigned release, including those already published and the bundled HiveMem seed. Sign the releases it installs first. Without keys pinned nothing changes.
 - A client that read the `error` field as a string must read `error.message` (and may use `error.code`). HiveXUI already parses every suite error shape with `parseHiveError`; the Hermes bridge and Magnus read only status codes.
-- Probes or scripts that compared `release` in `/health/live` or `/healthz` with `1.2.2` now see the package version (for example `1.9.1`).
+- Probes or scripts that compared `release` in `/health/live` or `/healthz` with `1.2.2` now see the package version (for example `1.10.0`).
 - A registry that receives PAM sign-ins through a reverse proxy sees every client at the proxy's address, so 10 failed sign-ins from anyone would make every sign-in through it wait up to 5 minutes. Set `HIVE_SKILLS_TRUSTED_PROXIES` to the proxy's IP. Oathweave bearer sign-in (suite installations) is not throttled and unaffected.
 
 ## [1.9.1] - 2026-11-24
