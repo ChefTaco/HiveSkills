@@ -278,10 +278,17 @@ app.post('/v1/agent/receipts/:target', async (c) => {
     const item = asObject(value);
     clean[slug(key)] = { version: text(item.version, 'version', 64), sha256: text(item.sha256, 'sha256', 64) };
   }
-  store.recordReceipt(target, { status, skills: clean, receivedAt: new Date().toISOString(), attestation: 'agent-reported' });
+  // Optional: the skills the reported activation installed (the Hermes bridge sends it). Automatic canary
+  // rollback acts only on these, never on skills that were already running.
+  let changed: string[] | undefined;
+  if (body.changed !== undefined) {
+    if (!Array.isArray(body.changed) || body.changed.length > 1000) throw new HTTPException(400, { message: 'changed must be an array of at most 1000 skill slugs' });
+    changed = [...new Set(body.changed.map(slug))];
+  }
+  store.recordReceipt(target, { status, skills: clean, ...(changed ? { changed } : {}), receivedAt: new Date().toISOString(), attestation: 'agent-reported' });
   // Opt-in canary promotion and rollback; a failure here never loses the stored receipt.
   if (config.rollout.promoteAfter !== null || config.rollout.autoRollback) {
-    try { applyRolloutPolicy(config.rollout, target, { status, skills: clean }); } catch (error) { console.error('rollout policy failed', error); }
+    try { applyRolloutPolicy(config.rollout, target, { status, skills: clean, ...(changed ? { changed } : {}) }); } catch (error) { console.error('rollout policy failed', error); }
   }
   return c.json({ ok: true });
 });

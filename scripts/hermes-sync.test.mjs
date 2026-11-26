@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { readArchive, boundedResponse } from './archive-utils.mjs';
-import { syncSkills } from './hermes-sync.mjs';
+import { restartGateway, syncSkills } from './hermes-sync.mjs';
 import { parsePublisherKeys } from './archive-utils.mjs';
 import { keygen, signRelease } from './sign-release.mjs';
 
@@ -152,4 +152,89 @@ test('pinned publisher keys refuse an unsigned or foreign release before anythin
     await syncSkills(options);
     assert.ok(existsSync(join(options.hermesHome, 'skills/registry/fixture/SKILL.md')));
   } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('a failed restart posts restart_failed naming only the skills installed since the last clean restart', async () => {
+  const f = fixture();
+  try {
+    const bytes = f.pack();
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const entry = (slug) => ({ slug, version: '1.0.0', sha256, archiveUrl: `https://registry.test/v1/skills/${slug}/releases/1.0.0/archive` });
+    let skills = [entry('steady')]; const receipts = [];
+    const fetchImpl = async (url, init) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/manifest')) return Response.json({ schemaVersion: 1, skills });
+      if (path === '/v1/agent/receipts/agent-1') { receipts.push(JSON.parse(init.body)); return Response.json({ ok: true }); }
+      return new Response(bytes);
+    };
+    let fail = false;
+    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, target: 'agent-1', token: 'tok', restart: () => { if (fail) throw new Error('gateway down'); } };
+    await syncSkills(options);
+    assert.deepEqual(receipts.map((item) => [item.status, item.changed]), [['activated', ['steady']]]);
+    // A later run installs one more skill and the restart fails: only that skill is blamed.
+    skills = [entry('steady'), entry('incoming')]; fail = true;
+    await assert.rejects(syncSkills(options), /gateway down/);
+    assert.deepEqual([receipts.at(-1).status, receipts.at(-1).changed, Object.keys(receipts.at(-1).skills).sort()], ['restart_failed', ['incoming'], ['incoming', 'steady']]);
+    const local = JSON.parse(readFileSync(join(options.hermesHome, '.hive-skills-sync/receipt.json'), 'utf8'));
+    assert.deepEqual([local.status, local.changed], ['restart_failed', ['incoming']]);
+    // The next run has nothing new to install but still owes the restart, and still names the skill.
+    await assert.rejects(syncSkills(options), /gateway down/);
+    assert.deepEqual([receipts.at(-1).status, receipts.at(-1).changed], ['restart_failed', ['incoming']]);
+    fail = false;
+    await syncSkills(options);
+    assert.deepEqual([receipts.at(-1).status, receipts.at(-1).changed], ['activated', ['incoming']]);
+    await syncSkills(options);
+    assert.deepEqual([receipts.at(-1).status, receipts.at(-1).changed], ['activated', []]);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('a restart_failed receipt that cannot be uploaded does not hide the restart error', async () => {
+  const f = fixture();
+  try {
+    const bytes = f.pack();
+    const entry = { slug: 'fixture', version: '1.0.0', sha256: createHash('sha256').update(bytes).digest('hex'), archiveUrl: 'https://registry.test/v1/skills/fixture/releases/1.0.0/archive' };
+    const fetchImpl = async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/manifest')) return Response.json({ schemaVersion: 1, skills: [entry] });
+      if (path.startsWith('/v1/agent/receipts/')) return new Response('unavailable', { status: 503 });
+      return new Response(bytes);
+    };
+    const quiet = console.error; console.error = () => {};
+    try {
+      await assert.rejects(syncSkills({ registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, target: 'agent-1', token: 'tok', restart: () => { throw new Error('gateway down'); } }), /gateway down/);
+    } finally { console.error = quiet; }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('the gateway restart checks a running gateway stays up', async () => {
+  const fake = (states) => {
+    const calls = []; let restarts = 0; let active = states.shift();
+    const run = (command, args) => {
+      assert.equal(command, '/usr/bin/systemctl');
+      const verb = args[1]; calls.push(verb);
+      if (verb === 'is-active') return { status: active ? 0 : 3 };
+      if (verb === 'try-restart') { active = states.shift() ?? active; return { status: 0 }; }
+      if (verb === 'show') return { status: 0, stdout: `${restarts}\n` };
+      throw new Error(`unexpected ${verb}`);
+    };
+    return { calls, run, crash: () => { restarts++; }, setActive: (value) => { active = value; } };
+  };
+  const slept = [];
+  // Running before and after: healthy.
+  let systemd = fake([true, true]);
+  await restartGateway({ run: systemd.run, sleep: async (ms) => { slept.push(ms); }, settleMs: 5 });
+  assert.deepEqual(systemd.calls, ['is-active', 'try-restart', 'show', 'is-active', 'show']);
+  assert.deepEqual(slept, [5]);
+  // Running before, down after the settle delay.
+  systemd = fake([true, true]);
+  await assert.rejects(restartGateway({ run: systemd.run, sleep: async () => { systemd.setActive(false); }, settleMs: 0 }), /not running after the restart/);
+  // Up again, but systemd had to restart it meanwhile (a crash loop).
+  systemd = fake([true, true]);
+  await assert.rejects(restartGateway({ run: systemd.run, sleep: async () => { systemd.crash(); }, settleMs: 0 }), /restarted again/);
+  // Not running before: try-restart leaves it stopped and that is not a failure.
+  systemd = fake([false, false]);
+  await restartGateway({ run: systemd.run, sleep: async () => { throw new Error('no settle wait'); } });
+  assert.deepEqual(systemd.calls, ['is-active', 'try-restart']);
+  // try-restart itself failing.
+  await assert.rejects(restartGateway({ run: (command, args) => ({ status: args[1] === 'try-restart' ? 1 : 0 }) }), /restart failed/);
 });

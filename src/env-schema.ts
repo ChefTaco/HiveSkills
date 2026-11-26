@@ -27,7 +27,7 @@ export function envSchemaDocument(): unknown {
       { name: 'HIVE_SKILLS_PUBLISHER_KEYS', description: 'Optional JSON array of publisher keys, [{"keyId","publicKey"}] with base64url raw Ed25519 public keys. Release signatures are verified against them at upload.' },
       { name: 'HIVE_SKILLS_REQUIRE_SIGNED_RELEASES', default: 'false', description: 'When true, refuse release uploads without a valid publisher signature. Needs HIVE_SKILLS_PUBLISHER_KEYS.' },
       { name: 'HIVE_SKILLS_CANARY_PROMOTE_AFTER', description: 'Optional 1-1000. Once this many distinct canary targets report the exact canary release activated, promote it to stable.' },
-      { name: 'HIVE_SKILLS_CANARY_AUTO_ROLLBACK', default: 'false', description: 'When true, a canary target reporting restart_failed with the canary release puts canary back on the stable release (or withdraws canary when stable has none).' },
+      { name: 'HIVE_SKILLS_CANARY_AUTO_ROLLBACK', default: 'false', description: 'When true, a canary target reporting restart_failed with the canary release, which that failed activation installed (the receipt\'s changed list), puts canary back on the stable release (or withdraws canary when stable has none).' },
       { name: 'HIVE_SKILLS_TARGETS', description: 'Optional initial deployment targets: name=user@host, comma-separated.' },
     ].map((entry) => ({ required: false, secret: false, ...entry })),
   };

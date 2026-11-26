@@ -24,10 +24,28 @@ function atomicJson(path, value) {
   const directory = openSync(dirname(path), 'r'); try { fsyncSync(directory); } finally { closeSync(directory); }
 }
 
-export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => {
-  const result = spawnSync('/usr/bin/systemctl', ['--user', 'try-restart', 'hermes-gateway.service'], { timeout: 30_000 });
-  if (result.status !== 0) throw new Error('Hermes gateway restart failed');
-} }) {
+const settleDelay = (raw) => { const value = Number(raw); return raw !== undefined && raw !== '' && Number.isSafeInteger(value) && value >= 0 && value <= 300_000 ? value : 10_000; };
+
+/**
+ * Restart the Hermes gateway and check it stays up. `try-restart` exiting 0 proves only that systemd
+ * accepted the job, so when the gateway was running before, it must still be active after a settle
+ * delay (HIVE_SKILLS_RESTART_SETTLE_MS, default 10000) without systemd having restarted it again.
+ * A gateway that was not running is left stopped, as before.
+ */
+export async function restartGateway({ run = spawnSync, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), settleMs = settleDelay(process.env.HIVE_SKILLS_RESTART_SETTLE_MS), unit = 'hermes-gateway.service' } = {}) {
+  const systemctl = (...args) => run('/usr/bin/systemctl', ['--user', ...args, unit], { encoding: 'utf8', timeout: 30_000 });
+  const restarts = () => { const value = Number(String(systemctl('show', '-p', 'NRestarts', '--value').stdout ?? '').trim()); return Number.isSafeInteger(value) ? value : null; };
+  const wasActive = systemctl('is-active', '--quiet').status === 0;
+  if (systemctl('try-restart').status !== 0) throw new Error('Hermes gateway restart failed');
+  if (!wasActive) return;
+  const before = restarts();
+  await sleep(settleMs);
+  if (systemctl('is-active', '--quiet').status !== 0) throw new Error('Hermes gateway is not running after the restart');
+  const afterwards = restarts();
+  if (before !== null && afterwards !== null && afterwards > before) throw new Error('Hermes gateway restarted again after the restart');
+}
+
+export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => restartGateway() }) {
   const origin = new URL(registry);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) throw new Error('Registry requires a plain HTTPS URL');
   // A frozen approval never bypasses native target revocation or a changed
@@ -106,7 +124,9 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
         if (!verifyReleaseSignature(publisherKeys, skill, metadata.signature)) throw new Error(`Skill ${skill.slug} ${skill.version} has no valid signature from a pinned publisher key`);
       }
     }
-    const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true };
+    // `pendingChanges` lists the skills installed since the gateway last restarted cleanly, carried
+    // across runs while a restart is pending, so a failed restart is attributed to them only.
+    const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true, pendingChanges: prior.restartPending === true && Array.isArray(prior.pendingChanges) ? prior.pendingChanges.filter(safeSlug) : [] };
     let changed = false;
     for (const skill of manifest.skills) {
       const destination = resolve(root, skill.slug);
@@ -119,6 +139,7 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
       const backup = resolve(control, skill.slug + '.previous');
       rmSync(staging, { recursive: true, force: true }); mkdirSync(staging, { mode: 0o700 });
       try { extractArchive(bytes, staging); } catch (error) { rmSync(staging, { recursive: true, force: true }); throw error; }
+      if (!next.pendingChanges.includes(skill.slug)) next.pendingChanges.push(skill.slug);
       atomicJson(transactionPath, { slug: skill.slug, nextState: { ...next, restartPending: true } });
       checkpoint('prepared');
       rmSync(backup, { recursive: true, force: true });
@@ -139,14 +160,29 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
       }
     }
     for (const slug of Object.keys(next.skills)) if (!desired.has(slug)) delete next.skills[slug];
+    next.pendingChanges = next.pendingChanges.filter((slug) => next.skills[slug]);
     next.restartPending ||= changed;
     atomicJson(statePath, next);
-    if (next.restartPending) { await restart(); next.restartPending = false; atomicJson(statePath, next); }
-    atomicJson(resolve(control, 'receipt.json'), { registry: origin.href, completedAt: new Date().toISOString(), skills: next.skills, status: 'activated' });
-    if (target) {
-      const receipt = await fetchImpl(new URL(origin.href.replace(/\/$/, '') + '/v1/agent/receipts/' + encodeURIComponent(target)), { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20_000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ skills: next.skills, status: 'activated' }) });
+    // `changed` names the skills this activation installed; the registry's automatic canary rollback
+    // acts only on those when the restart fails.
+    const report = async (status, changes) => {
+      atomicJson(resolve(control, 'receipt.json'), { registry: origin.href, completedAt: new Date().toISOString(), skills: next.skills, changed: changes, status });
+      if (!target) return;
+      const receipt = await fetchImpl(new URL(origin.href.replace(/\/$/, '') + '/v1/agent/receipts/' + encodeURIComponent(target)), { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20_000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ skills: next.skills, changed: changes, status }) });
       if (!receipt.ok) throw new Error('Fleet receipt upload failed');
+    };
+    const changes = [...next.pendingChanges];
+    if (next.restartPending) {
+      try { await restart(); }
+      catch (error) {
+        // Keep the restart pending for the next run and tell the registry, best effort: the restart
+        // error is what the caller needs to see.
+        try { await report('restart_failed', changes); } catch (reportError) { console.error('restart_failed receipt upload failed', reportError); }
+        throw error;
+      }
+      next.restartPending = false; next.pendingChanges = []; atomicJson(statePath, next);
     }
+    await report('activated', changes);
     return next;
   } finally { rmSync(lockPath, { recursive: true, force: true }); }
 }
