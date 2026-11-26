@@ -26,8 +26,8 @@ const release = (slug: string, version: string, fill: string) => {
   return { version, sha256: fill.repeat(64) };
 };
 const tokens: Record<string, string> = {};
-const receipt = (target: string, status: string, skills: Record<string, { version: string; sha256: string }>) => app.request(`https://skills.example.com/v1/agent/receipts/${target}`, {
-  method: 'POST', headers: { authorization: `Bearer ${tokens[target]}`, 'content-type': 'application/json' }, body: JSON.stringify({ status, skills }),
+const receipt = (target: string, status: string, skills: Record<string, { version: string; sha256: string }>, changed?: string[]) => app.request(`https://skills.example.com/v1/agent/receipts/${target}`, {
+  method: 'POST', headers: { authorization: `Bearer ${tokens[target]}`, 'content-type': 'application/json' }, body: JSON.stringify({ status, skills, ...(changed ? { changed } : {}) }),
 });
 const versions = (slug: string) => ({ stable: store.channelRelease('stable', slug)?.version, canary: store.channelRelease('canary', slug)?.version });
 const systemAudit = () => (store.listAudit(100, Number.MAX_SAFE_INTEGER) as Array<{ actor: string; action: string; subject: string; details: string }>).filter((row) => row.actor === 'system');
@@ -85,9 +85,13 @@ test('a failed restart with the canary release rolls canary back to stable', asy
   store.promoteRelease('rollback-example', stable.version, 'stable');
   store.promoteRelease('rollback-example', canary.version, 'canary');
   // A failure with the stable release installed is not the canary's fault.
-  await receipt('agent-1', 'restart_failed', { 'rollback-example': stable });
+  await receipt('agent-1', 'restart_failed', { 'rollback-example': stable }, ['rollback-example']);
   assert.deepEqual(versions('rollback-example'), { stable: '1.0.0', canary: '1.1.0' });
+  // Nor is one that does not say the activation installed it (older agents send no `changed`).
   await receipt('agent-1', 'restart_failed', { 'rollback-example': canary });
+  await receipt('agent-1', 'restart_failed', { 'rollback-example': canary }, []);
+  assert.deepEqual(versions('rollback-example'), { stable: '1.0.0', canary: '1.1.0' });
+  await receipt('agent-1', 'restart_failed', { 'rollback-example': canary }, ['rollback-example']);
   assert.deepEqual(versions('rollback-example'), { stable: '1.0.0', canary: '1.0.0' });
   const [rolledBack] = systemAudit();
   assert.deepEqual(JSON.parse(rolledBack!.details), { channel: 'canary', version: '1.0.0', automatic: 'rollback', failedVersion: '1.1.0', target: 'agent-1' });
@@ -97,11 +101,40 @@ test('without a stable release a failing canary release is withdrawn', async () 
   store.createSkill({ slug: 'new-example', name: 'New example', description: 'Synthetic fixture', homepage: null, enabled: true });
   const canary = release('new-example', '0.1.0', '9');
   store.promoteRelease('new-example', canary.version, 'canary');
-  await receipt('agent-2', 'restart_failed', { 'new-example': canary });
+  await receipt('agent-2', 'restart_failed', { 'new-example': canary }, ['new-example']);
   assert.deepEqual(versions('new-example'), { stable: undefined, canary: undefined });
   const [withdrawn] = systemAudit();
   assert.deepEqual([withdrawn?.action, withdrawn?.subject], ['release.withdraw', 'new-example']);
   const admin = { cookie: `hive_skills_session=${createSession('admin')}` };
   const feed = await (await app.request('https://skills.example.com/v1/hive/events', { headers: admin })).json() as { data: Array<{ type: string; title: string }> };
   assert.ok(feed.data.some((item) => item.type === 'skill.release.withdrawn' && item.title === 'Skill new-example withdrawn from canary automatically'));
+});
+
+test('a failed restart rolls back only the skills the failing activation installed', async () => {
+  store.createSkill({ slug: 'healthy-example', name: 'Healthy example', description: 'Synthetic fixture', homepage: null, enabled: true });
+  store.createSkill({ slug: 'changed-example', name: 'Changed example', description: 'Synthetic fixture', homepage: null, enabled: true });
+  const healthyStable = release('healthy-example', '1.0.0', '1');
+  const healthyCanary = release('healthy-example', '1.1.0', '2');
+  const changedStable = release('changed-example', '1.0.0', '3');
+  const changedCanary = release('changed-example', '1.1.0', '4');
+  for (const [slug, stable, canary] of [['healthy-example', healthyStable, healthyCanary], ['changed-example', changedStable, changedCanary]] as const) {
+    store.promoteRelease(slug, stable.version, 'stable');
+    store.promoteRelease(slug, canary.version, 'canary');
+  }
+  const response = await receipt('agent-1', 'restart_failed', { 'healthy-example': healthyCanary, 'changed-example': changedCanary }, ['changed-example']);
+  assert.equal(response.status, 200);
+  assert.deepEqual(versions('changed-example'), { stable: '1.0.0', canary: '1.0.0' });
+  assert.deepEqual(versions('healthy-example'), { stable: '1.0.0', canary: '1.1.0' });
+  // The stored receipt keeps the list.
+  const stored = (store.listReceipts('agent-1') as Array<{ receipt_json: string }>)[0]!;
+  assert.deepEqual(JSON.parse(stored.receipt_json).changed, ['changed-example']);
+});
+
+test('a malformed changed list is refused', async () => {
+  for (const changed of ['changed-example', [42], ['Not a slug!'], Array.from({ length: 1001 }, (_, index) => `skill-${index}`)]) {
+    const response = await app.request('https://skills.example.com/v1/agent/receipts/agent-1', {
+      method: 'POST', headers: { authorization: `Bearer ${tokens['agent-1']}`, 'content-type': 'application/json' }, body: JSON.stringify({ status: 'restart_failed', skills: {}, changed }),
+    });
+    assert.equal(response.status, 400);
+  }
 });

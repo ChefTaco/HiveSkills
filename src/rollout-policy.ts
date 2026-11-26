@@ -1,6 +1,6 @@
 /** Opt-in rollout automation settings (see src/rollout.ts). Free of storage imports, for config. */
 export type RolloutPolicy = { promoteAfter: number | null; autoRollback: boolean };
-export type Receipt = { status: string; skills: Record<string, { version: string; sha256: string }> };
+export type Receipt = { status: string; skills: Record<string, { version: string; sha256: string }>; changed?: string[] };
 
 export function parseRolloutPolicyEnv(env: NodeJS.ProcessEnv): RolloutPolicy {
   const raw = env.HIVE_SKILLS_CANARY_PROMOTE_AFTER?.trim();

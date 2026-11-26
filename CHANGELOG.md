@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Automatic canary rollback (`HIVE_SKILLS_CANARY_AUTO_ROLLBACK=true`) now works with the shipped Hermes bridge and is scoped to what changed. The bridge used to throw on a failed gateway restart without telling the registry, so rollback never fired; it now posts a `restart_failed` receipt before exiting with the error. It also checks a running gateway is still active (and was not restarted again by systemd) after a settle delay before it reports `activated` (`HIVE_SKILLS_RESTART_SETTLE_MS`, default 10000), so promotion counts healthy gateways rather than accepted restart jobs. Receipts gain an optional `changed` list (the skills installed since the gateway last restarted cleanly, kept across runs while a restart is pending) and rollback acts only on the canary skills named there; previously every canary skill in the receipt was rolled back, including long-healthy ones. **Upgrade:** redeploy the bridge to agent hosts (`scripts/deploy-hermes-agent.sh`) to get the receipts; a sync that restarts a running gateway now takes about 10 seconds longer. A custom agent that sends `restart_failed` without `changed` no longer triggers a rollback.
+
 ## [1.10.0] - 2026-11-26
 
 ### Added

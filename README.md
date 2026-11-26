@@ -269,8 +269,17 @@ receipts canary targets send:
   canary targets report it (exact version and digest) `activated`. A release with an advisory is
   never promoted automatically.
 - `HIVE_SKILLS_CANARY_AUTO_ROLLBACK=true` puts canary back on the stable release when a canary
-  target reports `restart_failed` with the canary release installed, or withdraws canary when
-  stable has no release of that skill.
+  target reports `restart_failed` with the canary release installed by the activation that failed,
+  or withdraws canary when stable has no release of that skill. Skills that were already running on
+  that target are left alone.
+
+The Hermes bridge reports both outcomes. After installing changed skills it restarts the gateway
+and, when the gateway was running, checks that it is still active, and was not restarted again by
+systemd, after a settle delay (`HIVE_SKILLS_RESTART_SETTLE_MS` in the bridge environment, default
+`10000`). Only then does it send `activated`; otherwise it sends `restart_failed`, keeps the restart
+pending for its next run and exits with an error. Both receipts carry `changed`, the skills
+installed since the gateway last restarted cleanly, and rollback acts only on those. A custom agent
+that sends `restart_failed` without `changed` triggers no rollback.
 
 Each change is audited with the actor `system` and appears in the event feed as
 `skill.release.promoted` or `skill.release.withdrawn`, saying it was automatic.

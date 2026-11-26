@@ -5,8 +5,10 @@
 // - HIVE_SKILLS_CANARY_PROMOTE_AFTER=N: once N distinct canary targets report `activated` with the
 //   exact canary release (version and digest), promote it to stable.
 // - HIVE_SKILLS_CANARY_AUTO_ROLLBACK=true: when a canary target reports `restart_failed` with the
-//   exact canary release installed, put canary back on the stable release (or withdraw canary when
-//   stable has none). A failure with the stable release installed changes nothing.
+//   exact canary release installed, and the receipt's `changed` list names the skill as installed by
+//   the activation that failed, put canary back on the stable release (or withdraw canary when stable
+//   has none). Skills that were already running, a failure with the stable release installed and a
+//   receipt without `changed` change nothing.
 import { store } from './db.js';
 import type { Receipt, RolloutPolicy } from './rollout-policy.js';
 
@@ -30,12 +32,14 @@ const reportedCanary = (slug: string, receipt: Receipt) => {
 export function applyRolloutPolicy(policy: RolloutPolicy, target: string, receipt: Receipt): string[] {
   if (store.targetPolicy(target)?.channel !== 'canary') return [];
   const changes: string[] = [];
+  const changed = new Set(receipt.changed ?? []);
   for (const slug of Object.keys(receipt.skills)) {
     if (!store.getSkill(slug)?.enabled) continue;
     const canary = reportedCanary(slug, receipt);
     if (!canary) continue;
     const stable = store.channelRelease('stable', slug);
     if (receipt.status === 'restart_failed' && policy.autoRollback) {
+      if (!changed.has(slug)) continue;
       if (stable?.version === canary.version) continue;
       if (stable) {
         store.promoteRelease(slug, stable.version, 'canary');
