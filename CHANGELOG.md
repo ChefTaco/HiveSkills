@@ -18,9 +18,15 @@
   it named a private term: `grep -q` exited early and the resulting SIGPIPE read as "no match". An
   unreadable denylist, message file or staged file, or an invalid pattern, now stops the check
   (exit 2) instead of passing.
-- The pre-push hook checks outgoing commits only: a new branch is compared with the
+- The pre-push hook checks outgoing commits only: a new branch is compared with the push target's
   remote-tracking branches, so a commit that removes an already-published term can be pushed
   without bypassing the hooks.
+- The private-data check also checks commit-message lines that start with `#` (git keeps them with
+  `-m`), lists files NUL-separated so non-ASCII names are checked, validates each `.private-terms`
+  line as a pattern of its own, strips carriage returns from it, exits 2 when it is a directory or
+  a dangling link, and reports an unreadable file without its name. The pre-push hook counts only
+  the push target's tracking branches as published; a push to a URL rather than a configured
+  remote checks the whole history.
 - `scripts/privacy-fail-closed.test.sh` (run in CI) covers 50 MB messages, 3000-commit pushes and
   a removal-only push with a test-only term. Repository tooling only; nothing to do when upgrading.
 
