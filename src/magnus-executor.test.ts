@@ -33,6 +33,18 @@ executor.executorTokenProvider(oathweave, {
   failureBackoffMs: 0,
 });
 
+// A second client whose token endpoint is down.
+const unavailable = { ...oathweave, clientId: 'hiveskills-executor-unavailable' };
+executor.executorTokenProvider(unavailable, {
+  fetch: (async () => new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } })) as typeof fetch,
+  failureBackoffMs: 0,
+});
+
+const staticCredential = 'obviously-fake-static-fallback-credential-0123456789';
+const fallbackFile = join(temporary, 'fallback-credential');
+writeFileSync(fallbackFile, staticCredential);
+chmodSync(fallbackFile, 0o600);
+
 store.seedTarget({ name: 'agent-1', host: 'agent-1.example.com', username: 'deploy', enabled: true });
 const job = () => {
   const preview = deploymentJournal.preview('agent-1', 'admin', { schemaVersion: 1, channel: 'stable', skills: [] });
@@ -40,12 +52,12 @@ const job = () => {
 };
 const reply = (jobId: string) => ({ status: 200, body: JSON.stringify({ jobId, status: 'completed', result: 'activated' }) });
 
-test('the executor configuration takes exactly one credential source', () => {
+test('the executor configuration takes Oathweave, a credential file, or both', () => {
   const base = { url: 'https://magnus.example.com' };
   assert.equal(executor.executorConfiguration.safeParse({ ...base, credentialFile: '/x' }).success, true);
   assert.equal(executor.executorConfiguration.safeParse({ ...base, oathweave }).success, true);
   assert.equal(executor.executorConfiguration.safeParse(base).success, false);
-  assert.equal(executor.executorConfiguration.safeParse({ ...base, credentialFile: '/x', oathweave }).success, false);
+  assert.equal(executor.executorConfiguration.safeParse({ ...base, credentialFile: '/x', oathweave }).success, true);
   assert.equal(executor.executorConfiguration.safeParse({ ...base, oathweave: { ...oathweave, tokenUrl: 'http://oathweave.example.com/token' } }).success, false);
   assert.equal(executor.executorConfiguration.safeParse({ ...base, oathweave: { ...oathweave, audience: undefined } }).success, false);
 });
@@ -113,4 +125,65 @@ test('the worker fails a job whose credential is unavailable instead of marking 
     assert.equal(done.status, 'failed');
     assert.equal(done.result, 'Magnus executor credential unavailable; nothing was dispatched');
   } finally { await stop(); }
+});
+
+test('with both configured, the Oathweave token is preferred and the credential file is not used', async () => {
+  configure({ url: 'https://magnus.example.com', oathweave, credentialFile: fallbackFile });
+  const id = job();
+  const seen: string[] = [];
+  await executor.executeMagnusJob(id, false, async (_url, options) => { seen.push(options.bearer); return reply('magnus-job-2'); });
+  assert.equal(seen.length, 1);
+  assert.match(seen[0]!, /^fake-token-/);
+});
+
+test('with both configured, a token Magnus still refuses (401 after a fresh token, or 403) falls back to the credential file once', async () => {
+  configure({ url: 'https://magnus.example.com', oathweave, credentialFile: fallbackFile });
+  for (const refusal of [401, 403]) {
+    const id = job();
+    const seen: string[] = [];
+    const answer = await executor.executeMagnusJob(id, false, async (_url, options) => {
+      seen.push(options.bearer);
+      return options.bearer === staticCredential ? reply('magnus-job-3') : { status: refusal, body: '' };
+    });
+    assert.equal(answer.jobId, 'magnus-job-3');
+    assert.equal(seen.at(-1), staticCredential);
+    assert.equal(seen.filter((bearer) => bearer === staticCredential).length, 1);
+    // A 401 is retried with a fresh token first; a 403 is not.
+    assert.equal(seen.length, refusal === 401 ? 3 : 2);
+  }
+});
+
+test('with both configured, an unavailable token endpoint falls back to the credential file', async () => {
+  configure({ url: 'https://magnus.example.com', oathweave: unavailable, credentialFile: fallbackFile });
+  const id = job();
+  const seen: string[] = [];
+  await executor.executeMagnusJob(id, false, async (_url, options) => { seen.push(options.bearer); return reply('magnus-job-4'); });
+  assert.deepEqual(seen, [staticCredential]);
+});
+
+test('without a credential file, an unavailable token endpoint dispatches nothing', async () => {
+  configure({ url: 'https://magnus.example.com', oathweave: unavailable });
+  const id = job();
+  let calls = 0;
+  await assert.rejects(executor.executeMagnusJob(id, false, async () => { calls++; return reply('x'); }), executor.ExecutorNotDispatchedError);
+  assert.equal(calls, 0);
+});
+
+test('the fallback never follows an answer Magnus may have acted on, or a lost request', async () => {
+  configure({ url: 'https://magnus.example.com', oathweave, credentialFile: fallbackFile });
+  for (const status of [409, 500, 503]) {
+    let calls = 0;
+    await assert.rejects(executor.executeMagnusJob(job(), false, async () => { calls++; return { status, body: '' }; }), /bounded job result/);
+    assert.equal(calls, 1, `no retry after ${status}`);
+  }
+  let calls = 0;
+  await assert.rejects(executor.executeMagnusJob(job(), false, async () => { calls++; throw new Error('Magnus operation outcome requires reconciliation'); }), /reconciliation/);
+  assert.equal(calls, 1);
+});
+
+test('an Oathweave-only configuration never falls back on a 403', async () => {
+  configure({ url: 'https://magnus.example.com', oathweave });
+  let calls = 0;
+  await assert.rejects(executor.executeMagnusJob(job(), true, async () => { calls++; return { status: 403, body: '' }; }), /bounded job result/);
+  assert.equal(calls, 1);
 });

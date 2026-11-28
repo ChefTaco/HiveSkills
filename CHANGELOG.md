@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` may now set both `oathweave` and `credentialFile`. HiveSkills then prefers the Oathweave service token and falls back to the static credential file, once per request, only when no token can be obtained or Magnus still refuses the token with `401` or `403` (before it admits a job, so nothing is dispatched twice); any other answer or a lost request is never retried. Each fallback logs a warning. Configurations with only one of the two behave as before. This lets a registry move to Oathweave before Magnus accepts its token (Magnus with `HIVESKILLS_SERVICE` links, permission `magnus:hiveskills`, audience `magnus`); see the README's "Approved deployments through Magnus".
+
+### Deprecated
+
+- The static Magnus executor bearer (`credentialFile`). Configure `oathweave`, keep `credentialFile` as the fallback while Magnus is upgraded and linked, then remove it.
+
 ## [1.11.1] - 2026-11-26
 
 Repository tooling only: the image's runtime code is unchanged from 1.11.0.

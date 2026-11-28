@@ -389,16 +389,40 @@ in `/data`; mount only product-owned protected configuration in `/config`.
 ### Approved deployments through Magnus
 
 Suite browser deployments require `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` with a verified
-HTTPS `url`, optional `caFile`, and exactly one way to authenticate:
+HTTPS `url`, optional `caFile`, and at least one way to authenticate:
 
-- `credentialFile`: a protected file (owned by the service user, mode 0600) holding a
+- `oathweave` (preferred): `{ "tokenUrl", "clientId", "clientSecretFile", "audience", "scope"? }`,
+  this registry's own Oathweave client. HiveSkills then sends short-lived `client_credentials`
+  tokens bound to `audience`, cached and refreshed before they expire, and after a `401` it fetches
+  a new token and retries once. The client secret file has the same protection rules as
+  `credentialFile` and is read at first use; rotating it takes a restart.
+- `credentialFile` (deprecated): a protected file (owned by the service user, mode 0600) holding a
   long-lived bearer, a dedicated endpoint-scoped grant configured in Magnus; it cannot run
   arbitrary commands or administer the fleet.
-- `oathweave`: `{ "tokenUrl", "clientId", "clientSecretFile", "audience", "scope"? }`, this
-  registry's own Oathweave client. HiveSkills then sends short-lived `client_credentials` tokens
-  bound to `audience`, cached and refreshed before they expire, and after a `401` it fetches a
-  new token and retries once. The executor must accept Oathweave service tokens for that
-  audience. The client secret file has the same protection rules and is read at first use.
+
+With both, HiveSkills uses the Oathweave token and falls back to `credentialFile`, once per request,
+only when no token can be obtained (the token endpoint is down, the secret file is unreadable) or
+when Magnus still refuses the token with `401` or `403` (a Magnus without Oathweave support for the
+executor routes, or a client it has not linked). Magnus gives those answers before it admits a job,
+so the fallback never dispatches a job twice; no other answer or network failure is retried. Each
+fallback logs a warning. Configure both while moving a registry to Oathweave, then remove
+`credentialFile` (and the static grant in Magnus) once the warnings stop.
+
+A Magnus release that accepts Oathweave tokens on its HiveSkills executor routes (the first one after 3.6.0) accepts this registry's token when:
+
+- the Oathweave client's tokens have audience `magnus` (set `"audience": "magnus"`) and the
+  permission `magnus:hiveskills`, from the issuer Magnus verifies (`OATHWEAVE_ISSUER`, normally the
+  browser issuer, so the client's machine policy selects it);
+- Magnus links the client in `MAGNUS_OATHWEAVE_IDENTITIES_JSON` with role `HIVESKILLS_SERVICE`, the
+  client ID as `subject` and this registry's ID in `MAGNUS_HIVESKILLS_DEPLOYMENTS_JSON` as
+  `localUserId`.
+
+```json
+{"url":"https://magnus.example.com","caFile":"/config/skills-executor-ca.pem",
+ "oathweave":{"tokenUrl":"https://identity.example.com/api/v1/oauth/token","clientId":"hiveskills-executor",
+   "clientSecretFile":"/config/skills-executor-client-secret","audience":"magnus","scope":"magnus:hiveskills"},
+ "credentialFile":"/config/skills-executor"}
+```
 
 A job whose credential cannot be obtained is marked failed without being dispatched. Each logical registry target must be explicitly
 mapped to an enrolled Magnus node and a configured native agent target. Host-native
