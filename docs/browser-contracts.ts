@@ -176,7 +176,7 @@ export const RevokedRelease = z.object({ slug: z.string(), version: z.string(), 
 export const ReceiptRevocation = z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/), version: z.string().max(64), reason: z.enum(['release', 'key']), keyId: keyId.optional(), action: z.enum(['refused', 'quarantined', 'reported']) }).strict();
 // The transparency log (GET /v1/transparency/head and /v1/transparency/entries). `entry` is the exact
 // string that was hashed (sha256 of `hiveskills-transparency-entry-v1\n<entry>`) and signed.
-export const TransparencyHead = z.object({ size: z.number().int().nonnegative(), headHash: digest, logKey: z.object({ keyId: z.string().regex(/^log-[a-f0-9]{16}$/), publicKey: rawEd25519Key }).strict(), signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/) }).strict();
+export const TransparencyHead = z.object({ size: z.number().int().nonnegative(), headHash: digest, signedAt: z.string(), logKey: z.object({ keyId: z.string().regex(/^log-[a-f0-9]{16}$/), publicKey: rawEd25519Key }).strict(), signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/) }).strict();
 export const TransparencyEntry = z.object({ index: z.number().int().nonnegative(), entry: z.string(), hash: digest, keyId: z.string(), signature: z.string() }).strict();
 export const TransparencyEntries = z.object({ entries: z.array(TransparencyEntry), nextFrom: z.number().int().nonnegative().nullable() }).strict();
 export const TransparencyEntriesQuery = z.object({ from: z.coerce.number().int().min(0).optional(), limit: z.coerce.number().int().min(1).max(500).optional() });

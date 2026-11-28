@@ -197,6 +197,13 @@ paths['/v1/revocations'].get = {
   parameters: [targetParameter],
   responses: { 200: { description: 'The signed list', content: { 'application/json': { schema: { $ref: '#/components/schemas/SignedRevocationList' } } } }, ...readerErrors, 404: { description: 'No revocation list has been published (revocations_unpublished)' } },
 };
+paths['/v1/revocations/{sequence}'].get = {
+  summary: 'A stored signed revocation list by sequence',
+  description: 'Every published list stays stored. The transparency log records each list\'s payload digest and signature; verifiers fetch the payloads here.',
+  security: trustReader,
+  parameters: [{ name: 'sequence', in: 'path', required: true, schema: { type: 'integer', minimum: 1 } }, targetParameter],
+  responses: { 200: { description: 'The signed list', content: { 'application/json': { schema: { $ref: '#/components/schemas/SignedRevocationList' } } } }, 400: { description: 'Invalid sequence' }, ...readerErrors, 404: { description: 'No list has this sequence' } },
+};
 paths['/admin/revocations'].put = {
   summary: 'Publish a newer signed revocation list',
   description: 'The payload must be signed by a key in HIVE_SKILLS_REVOCATION_KEYS, valid, unexpired and of a higher sequence than the current list. Revoked releases are withdrawn from their channels; revoked publisher keys can no longer sign releases. The list is appended to the transparency log.',
@@ -214,14 +221,14 @@ paths['/admin/revocations'].put = {
 };
 paths['/v1/transparency/head'].get = {
   summary: 'The signed head of the transparency log',
-  description: 'Size, hash of the last entry (64 zeros when empty) and the log public key; signature is Ed25519 over "hiveskills-transparency-head-v1\\n<size>\\n<headHash>\\n".',
+  description: 'Size, hash of the last entry (64 zeros when empty), signing time and the log public key; signature is Ed25519 over "hiveskills-transparency-head-v1\\n<size>\\n<headHash>\\n<signedAt>\\n<logKeyId>\\n".',
   security: trustReader,
   parameters: [targetParameter],
   responses: { 200: { description: 'The head', content: { 'application/json': { schema: { $ref: '#/components/schemas/TransparencyHead' } } } }, ...readerErrors },
 };
 paths['/v1/transparency/entries'].get = {
   summary: 'Transparency log entries, oldest first',
-  description: 'Entries from index from on. Each entry is the exact JSON string that was hashed and signed; verify the whole log with scripts/verify-transparency-log.mjs. nextFrom is null on the last page.',
+  description: 'Entries from index from on, up to limit and, past the first entry, about 4 MiB of entry text. Each entry is the exact JSON string that was hashed and signed; verify the whole log with scripts/verify-transparency-log.mjs. nextFrom is null on the last page.',
   security: trustReader,
   parameters: [targetParameter, { name: 'from', in: 'query', required: false, description: 'First index (default 0)', schema: { type: 'integer', minimum: 0 } }, { name: 'limit', in: 'query', required: false, description: 'Page size, 1 to 500 (default 100)', schema: { type: 'integer', minimum: 1, maximum: 500 } }],
   responses: { 200: { description: 'A page of entries', content: { 'application/json': { schema: { $ref: '#/components/schemas/TransparencyEntries' } } } }, 400: { description: 'Invalid page' }, ...readerErrors },

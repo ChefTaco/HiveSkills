@@ -1,5 +1,5 @@
 import { createPrivateKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { rawPublicKey } from '../scripts/archive-utils.mjs';
 import { entrySigningMessage, headSigningMessage, logKeyId } from '../scripts/transparency-log.mjs';
 
@@ -10,12 +10,15 @@ let cached: { file: string; key: LogKey } | undefined;
 
 /**
  * Load the log key from `file`, creating it (Ed25519, PKCS#8 PEM, mode 0600, never overwritten) when
- * it does not exist yet. The private key never leaves this process; only the public key is served.
+ * it does not exist yet. An existing key readable by group or others is refused. The private key never
+ * leaves this process; only the public key is served.
  */
 export function logKey(file: string): LogKey {
   if (cached?.file === file) return cached.key;
   let pem: string;
   try {
+    // A key others on the host can read is no longer the registry's alone: refuse it.
+    if ((statSync(file).mode & 0o077) !== 0) throw new Error(`The transparency log key ${file} is readable by group or others; restrict it to the service account (chmod 600)`);
     pem = readFileSync(file, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -39,5 +42,5 @@ export function logKey(file: string): LogKey {
 export const signEntry = (key: LogKey, index: number, hash: string): string =>
   sign(null, entrySigningMessage(index, hash), key.privateKey).toString('base64url');
 
-export const signHead = (key: LogKey, size: number, headHash: string): string =>
-  sign(null, headSigningMessage(size, headHash), key.privateKey).toString('base64url');
+export const signHead = (key: LogKey, size: number, headHash: string, signedAt: string): string =>
+  sign(null, headSigningMessage(size, headHash, signedAt, key.keyId), key.privateKey).toString('base64url');

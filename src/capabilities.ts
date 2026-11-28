@@ -5,7 +5,7 @@
  *
  * - `skills.pinned-release.v1`: `GET /v1/skills/:slug/releases/:version` and its archive serve
  *   one immutable release by exact version to a pinned-release reader, promoted or not.
- * - `skills.revocations.v1`: `GET /v1/revocations` serves the current signed revocation list and
+ * - `skills.revocations.v1`: `GET /v1/revocations` (and `/v1/revocations/:sequence`) serve signed revocation lists and
  *   `PUT /admin/revocations` publishes a newer one.
  * - `skills.transparency-log.v1`: `GET /v1/transparency/head` and `GET /v1/transparency/entries` serve
  *   the signed, hash-chained transparency log of publications and revocations.

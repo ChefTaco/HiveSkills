@@ -196,14 +196,21 @@ export function verifyRevocationList(keys, envelope) {
   return parseRevocationPayload(envelope.payload);
 }
 
-/** The revoked-key entry for this key id and key, if the list revokes it. */
-export function keyRevocation(list, keyId, key) {
+/**
+ * The revoked-key entry for this public key (a key object or its base64url raw form), if the list
+ * revokes it. A key is revoked by its public key, whatever key id it is pinned or signed under.
+ */
+export function keyRevocation(list, key) {
   if (!list || !key) return undefined;
   const publicKey = typeof key === 'string' ? key : rawPublicKey(key);
-  return list.keys.find((entry) => entry.keyId === keyId && entry.publicKey === publicKey);
+  return list.keys.find((entry) => entry.publicKey === publicKey);
 }
 
-/** The revoked-release entry for this exact release, if the list revokes it (any digest). */
-export function releaseRevocation(list, slug, version) {
-  return list?.releases.find((entry) => entry.slug === slug && entry.version === version);
+/**
+ * The revoked-release entry for this release, if the list revokes it: by slug and version, or by
+ * digest under any name, so the same bytes cannot come back relabelled as another version or skill.
+ */
+export function releaseRevocation(list, release) {
+  if (!list || !release) return undefined;
+  return list.releases.find((entry) => (entry.slug === release.slug && entry.version === release.version) || (typeof release.sha256 === 'string' && entry.sha256 === release.sha256));
 }

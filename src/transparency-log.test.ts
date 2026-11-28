@@ -64,7 +64,7 @@ test('releases stored before the log existed are recorded once, marked as backfi
     ['release.published', '1.0.0', true, true],
     ['release.published', '1.1.0', true, false],
   ]);
-  assert.equal(store.backfillTransparencyLog(), 0, 'never twice');
+  assert.deepEqual(store.reconcileTransparencyLog(), { appended: 0, withdrawn: 0 }, 'never twice');
   const keyFile = join(temporary, 'transparency-log-key.pem');
   assert.equal(statSync(keyFile).mode & 0o777, 0o600);
 });
@@ -93,7 +93,10 @@ test('the database refuses to change or delete log entries and revocation lists'
   try {
     assert.throws(() => db.prepare("UPDATE transparency_log SET entry='{}' WHERE log_index=0").run(), /append-only/);
     assert.throws(() => db.prepare('DELETE FROM transparency_log WHERE log_index=0').run(), /append-only/);
-    db.prepare("INSERT INTO revocation_lists VALUES (99,'{}','x','k','s','test','2026-01-01T00:00:00.000Z')").run();
+    const authority = join(temporary, 'trigger-authority.pem');
+    keygen({ out: authority, keyId: 'trigger' });
+    const { payload } = signRevocations({ key: authority, keyId: 'trigger', list: { sequence: 99, keys: [], releases: [] } });
+    db.prepare("INSERT INTO revocation_lists VALUES (99,?,'x','k','s','test','2026-01-01T00:00:00.000Z')").run(payload);
     assert.throws(() => db.prepare('DELETE FROM revocation_lists').run(), /append-only/);
     assert.throws(() => db.prepare('UPDATE revocation_lists SET payload=? WHERE sequence=99').run('[]'), /append-only/);
   } finally { db.close(); }
@@ -116,6 +119,8 @@ test('verification detects every change to the log', async () => {
   fails({ entries: entries.slice(0, 3) }, /head names 4 entries but 3/);
   fails({ head: { ...head, headHash: entries[2]!.hash } }, /head hash does not match/);
   fails({ head: { ...head, signature: entries[0]!.signature } }, /head signature does not verify/);
+  // The head's time and key id are signed too.
+  fails({ head: { ...head, signedAt: '2020-01-01T00:00:00.000Z' } }, /head signature does not verify/);
   fails({ logKeys: keygen({ out: join(temporary, 'other-log.pem'), keyId: 'other' }).publicKey }, /not trusted/);
   // A publisher signature swapped for one over a different digest.
   const forged = signRelease({ key: publisherFile, keyId: 'publisher-2026', slug: 'logged', version: '1.0.0', sha256: 'f'.repeat(64) }).signature;
@@ -165,4 +170,54 @@ test('the verification CLI checks a live registry and a saved copy', async () =>
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /verify-transparency-log: entry 1: missing or out of order/);
   assert.equal(cli('--file', saved, '--registry', 'https://skills.example.com').status, 1);
+});
+
+test('every start records what an older or restored binary stored without the log', async () => {
+  const db = new DatabaseSync(join(temporary, 'registry.sqlite'), { enableForeignKeyConstraints: true });
+  const newDigest = createHash('sha256').update('legacy-replaced').digest('hex');
+  try {
+    // Written without log entries: a new release, a re-signature, a deleted release and a replaced one.
+    db.prepare("INSERT INTO skills VALUES ('older','Older','Synthetic fixture',NULL,1,'2026-02-01T00:00:00.000Z','2026-02-01T00:00:00.000Z')").run();
+    db.prepare("INSERT INTO releases(skill_slug,version,sha256,archive_path,notes,created_at) VALUES ('older','1.0.0',?,'/nonexistent',NULL,'2026-02-01T00:00:00.000Z')").run(createHash('sha256').update('older').digest('hex'));
+    db.prepare("INSERT INTO release_signatures VALUES ('legacy','1.1.0','publisher-2026',?,'2026-02-01T00:00:00.000Z')").run(signRelease({ key: publisherFile, keyId: 'publisher-2026', slug: 'legacy', version: '1.1.0', sha256: createHash('sha256').update('legacy-2').digest('hex') }).signature);
+    db.prepare("DELETE FROM releases WHERE skill_slug='legacy' AND version='1.0.0'").run();
+    db.prepare("UPDATE releases SET sha256=? WHERE skill_slug='logged' AND version='1.0.0'").run(newDigest);
+  } finally { db.close(); }
+  const before = store.transparencyHead().size;
+  assert.deepEqual(store.reconcileTransparencyLog(), { appended: 5, withdrawn: 0 });
+  const added = store.transparencyEntries(before, 50).map((row) => JSON.parse(row.entry) as { kind: string; subject: { slug: string; version?: string; backfilled?: boolean } });
+  assert.deepEqual(added.map((entry) => [entry.kind, entry.subject.slug, entry.subject.version ?? null, entry.subject.backfilled]), [
+    ['skill.deleted', 'legacy', null, true],
+    ['skill.deleted', 'logged', null, true],
+    ['release.signed', 'legacy', '1.1.0', true],
+    ['release.published', 'older', '1.0.0', true],
+    ['release.published', 'logged', '1.0.0', true],
+  ]);
+  assert.deepEqual(store.reconcileTransparencyLog(), { appended: 0, withdrawn: 0 }, 'nothing left to record');
+  const { head, entries } = await read();
+  const summary = verifyTransparencyLog({ entries, head, logKeys: logPublicKey() });
+  assert.match(summary.warnings.join('\n'), /logged@1\.0\.0 was published again after its skill was deleted, with a different digest/);
+  // The replaced bytes kept the old signature, which the publisher keys expose.
+  assert.throws(() => verifyTransparencyLog({ entries, head, logKeys: logPublicKey(), publisherKeys: parsePublisherKeys(JSON.stringify([publisher])) }), /publisher signature of logged@1\.0\.0 does not verify/);
+});
+
+test('entry pages stay bounded by size, and the log key must be private', async () => {
+  assert.equal(store.transparencyEntries(0, 500, 10).length, 1, 'past the first entry, a page ends at the byte limit');
+  assert.ok(store.transparencyEntries(0, 500).length > 1);
+  const { logKey } = await import('./transparency.js');
+  const shared = join(temporary, 'shared-log-key.pem');
+  writeFileSync(shared, readFileSync(join(temporary, 'transparency-log-key.pem')), { mode: 0o644 });
+  const { chmodSync } = await import('node:fs');
+  chmodSync(shared, 0o644);
+  assert.throws(() => logKey(shared), /readable by group or others/);
+  chmodSync(shared, 0o600);
+  assert.equal(logKey(shared).publicKey, logPublicKey());
+});
+
+test('the verification CLI pages as asked', async () => {
+  const fetchImpl = (async (input: string | URL, init?: RequestInit) => app.request(String(input), init)) as typeof fetch;
+  const env = { HIVE_SKILLS_TARGET: 'agent-1', HIVE_SKILLS_TARGET_TOKEN: targetToken };
+  const size = store.transparencyHead().size;
+  assert.equal((await verifyCli(['--registry', 'https://skills.example.com', '--log-key', logPublicKey(), '--page-size', '2'], env, fetchImpl)).size, size);
+  for (const bad of ['0', '501', 'x']) await assert.rejects(verifyCli(['--registry', 'https://skills.example.com', '--page-size', bad], env, fetchImpl), /page size/);
 });

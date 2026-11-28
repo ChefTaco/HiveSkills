@@ -113,12 +113,37 @@ test('revoking a release withdraws it from its channels and blocks promotion and
   store.createSkill({ slug: 'incident', name: 'incident', description: 'Synthetic fixture', homepage: null, enabled: true });
   const reupload = await app.request(url('/admin/skills/incident/releases'), json('POST', { version: '1.0.0', archiveBase64: Buffer.from('x').toString('base64') }));
   assert.equal(reupload.status, 409);
-  assert.match(JSON.stringify(await reupload.json()), /version is revoked/);
+  assert.match(JSON.stringify(await reupload.json()), /version or archive is revoked/);
+  // The same bytes under another version or skill are refused too, in the transaction that would store them.
+  const { ReleaseRefusedError } = await import('./db.js');
+  for (const [slug, version] of [['incident', '9.0.0'], ['renamed', '1.0.0']] as const) {
+    if (!store.getSkill(slug)) store.createSkill({ slug, name: slug, description: 'Synthetic fixture', homepage: null, enabled: true });
+    assert.throws(() => store.addRelease({ skillSlug: slug, version, sha256: digest, archivePath: '/nonexistent', notes: null, createdAt: new Date().toISOString() }), (error: unknown) => error instanceof ReleaseRefusedError && error.status === 409 && /revoked/.test(error.message));
+  }
 });
 
-test('a revoked publisher key can no longer sign releases here', async () => {
+test('a version recorded in the transparency log can never be stored again, even after its skill was deleted', async () => {
+  release('reused', '1.0.0');
+  store.deleteSkill('reused');
+  store.createSkill({ slug: 'reused', name: 'reused', description: 'Synthetic fixture', homepage: null, enabled: true });
+  const reupload = await app.request(url('/admin/skills/reused/releases'), json('POST', { version: '1.0.0', archiveBase64: Buffer.from('x').toString('base64') }));
+  assert.equal(reupload.status, 409);
+  assert.match(JSON.stringify(await reupload.json()), /published before/);
+  const deletion = store.transparencyEntries(0, 500).map((row) => JSON.parse(row.entry) as { kind: string; subject: { slug: string; releases?: unknown } }).find((entry) => entry.kind === 'skill.deleted' && entry.subject.slug === 'reused');
+  assert.deepEqual(deletion?.subject.releases, [{ version: '1.0.0', sha256: sha('reused@1.0.0') }]);
+});
+
+test('a revoked publisher key can no longer sign releases here, and its releases leave their channels', async () => {
   release('rotated', '1.0.0');
-  assert.equal((await publish(list(3, { keys: [{ keyId: 'publisher-2026', publicKey: publisher.publicKey, reason: 'Synthetic key compromise' }] }))).status, 201);
+  release('keyed-old', '1.0.0', { file: publisherFile, keyId: 'publisher-2026' });
+  store.promoteRelease('keyed-old', '1.0.0', 'stable');
+  // Revoked by public key, whatever id the list names it under.
+  const revokedKey = await publish(list(3, { keys: [{ keyId: 'any-name', publicKey: publisher.publicKey, reason: 'Synthetic key compromise' }] }));
+  assert.equal(revokedKey.status, 201);
+  assert.deepEqual((await revokedKey.json() as { withdrawn: unknown }).withdrawn, [{ slug: 'keyed-old', version: '1.0.0', channel: 'stable' }]);
+  const promote = await app.request(url('/admin/channels/stable/keyed-old'), json('PUT', { version: '1.0.0' }));
+  assert.equal(promote.status, 409);
+  assert.match(JSON.stringify(await promote.json()), /revoked publisher key/);
   const digest = store.getRelease('rotated', '1.0.0')!.sha256;
   const attach = (file: string, keyId: string) => app.request(url('/admin/skills/rotated/releases/1.0.0/signature'), json('PUT', { keyId, value: signRelease({ key: file, keyId, slug: 'rotated', version: '1.0.0', sha256: digest }).signature }));
   const refused = await attach(publisherFile, 'publisher-2026');
@@ -196,10 +221,22 @@ test('every revocation list and release is in the transparency log, verifiable e
     if (page.nextFrom === null) break;
     from = page.nextFrom;
   }
-  const summary = verifyTransparencyLog({ entries, head, logKeys: head.logKey.publicKey, revocationKeys: parsePublisherKeys(JSON.stringify([authority])) });
+  // The log records each list's digest; the payloads are served by sequence.
+  const revocationPayloads = new Map<number, string>();
+  for (const sequence of [1, 2, 3, 4]) revocationPayloads.set(sequence, (await (await app.request(url(`/v1/revocations/${sequence}?target=agent-1`), { headers: asTarget })).json() as { payload: string }).payload);
+  assert.equal((await app.request(url('/v1/revocations/9?target=agent-1'), { headers: asTarget })).status, 404);
+  assert.equal((await app.request(url('/v1/revocations/01?target=agent-1'), { headers: asTarget })).status, 400);
+  assert.equal((await app.request(url('/v1/revocations/1'))).status, 401);
+  const revocationKeys = parsePublisherKeys(JSON.stringify([authority]));
+  assert.throws(() => verifyTransparencyLog({ entries, head, logKeys: head.logKey.publicKey, revocationKeys }), /payload of revocation list 1 is missing/);
+  const tampered = new Map(revocationPayloads).set(2, revocationPayloads.get(1)!);
+  assert.throws(() => verifyTransparencyLog({ entries, head, logKeys: head.logKey.publicKey, revocationKeys, revocationPayloads: tampered }), /revocation payload digest does not match/);
+  const summary = verifyTransparencyLog({ entries, head, logKeys: head.logKey.publicKey, revocationKeys, revocationPayloads });
+  assert.ok(summary.deletedReleases >= 2);
+  assert.ok(entries.every((row) => row.entry.length < 4096), 'no entry embeds a revocation payload');
   assert.equal(summary.revocationLists, 4);
   assert.equal(summary.revocationSequence, 4);
-  assert.ok(summary.releases >= 10);
+  assert.ok(summary.releases + summary.deletedReleases >= 10);
   // With the publisher keys, the invalid signature this test stored directly (bypassing the upload
   // check) is found; the registry itself never accepts one.
   assert.throws(() => verifyTransparencyLog({ entries, head, logKeys: head.logKey.publicKey, publisherKeys: parsePublisherKeys(JSON.stringify([publisher, second])) }), /publisher signature of overview@1\.3\.0 does not verify/);

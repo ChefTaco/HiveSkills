@@ -1755,6 +1755,9 @@
                 "pattern": "^[A-Za-z0-9_-]{86}$",
                 "type": "string"
               },
+              "signedAt": {
+                "type": "string"
+              },
               "size": {
                 "maximum": 9007199254740991,
                 "minimum": 0,
@@ -1764,6 +1767,7 @@
             "required": [
               "size",
               "headHash",
+              "signedAt",
               "logKey",
               "signature"
             ],
@@ -2389,6 +2393,9 @@
             "pattern": "^[A-Za-z0-9_-]{86}$",
             "type": "string"
           },
+          "signedAt": {
+            "type": "string"
+          },
           "size": {
             "maximum": 9007199254740991,
             "minimum": 0,
@@ -2398,6 +2405,7 @@
         "required": [
           "size",
           "headHash",
+          "signedAt",
           "logKey",
           "signature"
         ],
@@ -4064,6 +4072,67 @@
         "summary": "The current signed revocation list"
       }
     },
+    "/v1/revocations/{sequence}": {
+      "get": {
+        "description": "Every published list stays stored. The transparency log records each list's payload digest and signature; verifiers fetch the payloads here.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sequence",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Enrolled target name; send its enrollment token as the bearer token",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedRevocationList"
+                }
+              }
+            },
+            "description": "The signed list"
+          },
+          "400": {
+            "description": "Invalid sequence"
+          },
+          "401": {
+            "description": "Target enrollment or sign-in required"
+          },
+          "403": {
+            "description": "Registry administrator access required"
+          },
+          "404": {
+            "description": "No list has this sequence"
+          }
+        },
+        "security": [
+          {
+            "targetToken": []
+          },
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "A stored signed revocation list by sequence"
+      }
+    },
     "/v1/skills": {
       "get": {
         "responses": {
@@ -4268,7 +4337,7 @@
     },
     "/v1/transparency/entries": {
       "get": {
-        "description": "Entries from index from on. Each entry is the exact JSON string that was hashed and signed; verify the whole log with scripts/verify-transparency-log.mjs. nextFrom is null on the last page.",
+        "description": "Entries from index from on, up to limit and, past the first entry, about 4 MiB of entry text. Each entry is the exact JSON string that was hashed and signed; verify the whole log with scripts/verify-transparency-log.mjs. nextFrom is null on the last page.",
         "parameters": [
           {
             "description": "Enrolled target name; send its enrollment token as the bearer token",
@@ -4338,7 +4407,7 @@
     },
     "/v1/transparency/head": {
       "get": {
-        "description": "Size, hash of the last entry (64 zeros when empty) and the log public key; signature is Ed25519 over \"hiveskills-transparency-head-v1\\n<size>\\n<headHash>\\n\".",
+        "description": "Size, hash of the last entry (64 zeros when empty), signing time and the log public key; signature is Ed25519 over \"hiveskills-transparency-head-v1\\n<size>\\n<headHash>\\n<signedAt>\\n<logKeyId>\\n\".",
         "parameters": [
           {
             "description": "Enrolled target name; send its enrollment token as the bearer token",

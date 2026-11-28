@@ -17,5 +17,5 @@ export function revocationSigningMessage(payload: string): Buffer;
 export function rawPublicKey(key: import('node:crypto').KeyObject): string;
 export function parseRevocationPayload(payload: string): RevocationList;
 export function verifyRevocationList(keys: Map<string, import('node:crypto').KeyObject>, envelope: unknown): RevocationList;
-export function keyRevocation(list: RevocationList | null | undefined, keyId: string, key: import('node:crypto').KeyObject | string | undefined): RevokedKey | undefined;
-export function releaseRevocation(list: RevocationList | null | undefined, slug: string, version: string): RevokedRelease | undefined;
+export function keyRevocation(list: RevocationList | null | undefined, key: import('node:crypto').KeyObject | string | undefined): RevokedKey | undefined;
+export function releaseRevocation(list: RevocationList | null | undefined, release: { slug: string; version: string; sha256?: string | undefined } | null | undefined): RevokedRelease | undefined;

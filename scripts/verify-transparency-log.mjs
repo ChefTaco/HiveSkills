@@ -5,7 +5,7 @@
 //   HIVE_SKILLS_TARGET=agent-1 HIVE_SKILLS_TARGET_TOKEN_FILE=~/.config/hive-skills/target-token \
 //     node scripts/verify-transparency-log.mjs --registry https://skills.example.com \
 //       --log-key <base64url> [--log-key <older key>] [--publisher-keys JSON] [--revocation-keys JSON] \
-//       [--known-head SIZE:HASH] [--save log.json]
+//       [--known-head SIZE:HASH] [--page-size N] [--save log.json]
 //   node scripts/verify-transparency-log.mjs --file log.json --log-key <base64url>
 //
 // Reading the log needs an enrolled target (HIVE_SKILLS_TARGET with HIVE_SKILLS_TARGET_TOKEN or
@@ -18,10 +18,15 @@ import { pathToFileURL } from 'node:url';
 import { boundedResponse, parsePublisherKeys } from './archive-utils.mjs';
 import { ed25519PublicKey, logKeyId, verifyTransparencyLog } from './transparency-log.mjs';
 
-const PAGE = 500;
+/** Entries per request (1 to 500); the registry also ends a page early past 4 MiB of entries. */
+export const DEFAULT_PAGE_SIZE = 100;
 
-/** Read the signed head and every entry it covers. */
-export async function fetchTransparencyLog({ registry, target, token, bearer, fetchImpl = fetch }) {
+/**
+ * Read the signed head, every entry it covers and the payload of every revocation list the log
+ * records (from GET /v1/revocations/<sequence>), as {head, entries, revocationPayloads}.
+ */
+export async function fetchTransparencyLog({ registry, target, token, bearer, fetchImpl = fetch, pageSize = DEFAULT_PAGE_SIZE }) {
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 500) throw new Error('The page size must be 1 to 500');
   const origin = new URL(registry);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) throw new Error('The registry needs a plain HTTPS URL');
   const base = origin.href.replace(/\/$/, '');
@@ -30,16 +35,23 @@ export async function fetchTransparencyLog({ registry, target, token, bearer, fe
     const url = new URL(base + path);
     if (target && !bearer) url.searchParams.set('target', target);
     for (const [name, value] of Object.entries(params)) url.searchParams.set(name, String(value));
-    return JSON.parse((await boundedResponse(await fetchImpl(url, { headers, redirect: 'error', signal: AbortSignal.timeout(30_000) }), 8 * 1024 * 1024)).toString('utf8'));
+    return JSON.parse((await boundedResponse(await fetchImpl(url, { headers, redirect: 'error', signal: AbortSignal.timeout(30_000) }), 16 * 1024 * 1024)).toString('utf8'));
   };
   const head = await read('/v1/transparency/head');
   const entries = [];
   while (entries.length < head.size) {
-    const page = await read('/v1/transparency/entries', { from: entries.length, limit: PAGE });
+    const page = await read('/v1/transparency/entries', { from: entries.length, limit: pageSize });
     if (!Array.isArray(page.entries) || page.entries.length === 0) throw new Error('The registry stopped serving entries before the head');
     entries.push(...page.entries.slice(0, head.size - entries.length));
   }
-  return { head, entries };
+  const revocationPayloads = {};
+  for (const row of entries) {
+    let entry;
+    try { entry = JSON.parse(row.entry); } catch { continue; } // The verifier reports it.
+    if (entry?.kind !== 'revocations.published' || !Number.isSafeInteger(entry.subject?.sequence)) continue;
+    revocationPayloads[entry.subject.sequence] = (await read(`/v1/revocations/${entry.subject.sequence}`)).payload;
+  }
+  return { head, entries, revocationPayloads };
 }
 
 function options(args) {
@@ -58,12 +70,12 @@ const secret = (value, file) => value || (file ? readFileSync(file, 'utf8').trim
 
 export async function main(argv, env = process.env, fetchImpl = fetch) {
   const given = options(argv);
-  const known = new Set(['registry', 'file', 'log-key', 'publisher-keys', 'revocation-keys', 'known-head', 'save']);
+  const known = new Set(['registry', 'file', 'log-key', 'publisher-keys', 'revocation-keys', 'known-head', 'page-size', 'save']);
   for (const name of Object.keys(given)) if (!known.has(name)) throw new Error(`Unknown option --${name}`);
   if (!given.registry === !given.file) throw new Error('Pass exactly one of --registry URL or --file FILE');
   const dump = given.file
     ? JSON.parse(readFileSync(given.file, 'utf8'))
-    : await fetchTransparencyLog({ registry: given.registry, target: env.HIVE_SKILLS_TARGET, token: secret(env.HIVE_SKILLS_TARGET_TOKEN, env.HIVE_SKILLS_TARGET_TOKEN_FILE), bearer: secret(undefined, env.HIVE_SKILLS_BEARER_FILE), fetchImpl });
+    : await fetchTransparencyLog({ registry: given.registry, target: env.HIVE_SKILLS_TARGET, token: secret(env.HIVE_SKILLS_TARGET_TOKEN, env.HIVE_SKILLS_TARGET_TOKEN_FILE), bearer: secret(undefined, env.HIVE_SKILLS_BEARER_FILE), fetchImpl, pageSize: given['page-size'] === undefined ? DEFAULT_PAGE_SIZE : Number(given['page-size']) });
   if (given.save) writeFileSync(given.save, JSON.stringify(dump, null, 2) + '\n', { mode: 0o600 });
   const logKeys = given['log-key'].length ? new Map(given['log-key'].map((key) => [logKeyId(key), ed25519PublicKey(key)])) : undefined;
   let knownHead;
@@ -76,6 +88,7 @@ export async function main(argv, env = process.env, fetchImpl = fetch) {
     entries: dump.entries, head: dump.head, logKeys,
     publisherKeys: parsePublisherKeys(given['publisher-keys']),
     revocationKeys: parsePublisherKeys(given['revocation-keys']),
+    revocationPayloads: new Map(Object.entries(dump.revocationPayloads ?? {}).map(([sequence, payload]) => [Number(sequence), payload])),
     knownHead,
   });
 }

@@ -291,15 +291,23 @@ import { signRevocations } from './sign-release.mjs';
 
 function revocationFixture() {
   const f = fixture();
-  const bytes = f.pack();
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  // Each content label packs its own archive, so different skills have different digests.
+  const archives = new Map();
+  const pack = (content) => {
+    if (!archives.has(content)) { writeFileSync(join(f.source, 'SKILL.md'), `# ${content}\n`); archives.set(content, f.pack()); }
+    return archives.get(content);
+  };
+  const shaOf = (content) => createHash('sha256').update(pack(content)).digest('hex');
+  const sha256 = shaOf('fixture');
+  const served = new Map();
   const publisherKey = join(f.root, 'publisher.pem'), newPublisherKey = join(f.root, 'publisher-new.pem'), authorityKey = join(f.root, 'authority.pem'), otherAuthorityKey = join(f.root, 'other-authority.pem');
   const publisher = keygen({ out: publisherKey, keyId: 'publisher-2026' });
   const newPublisher = keygen({ out: newPublisherKey, keyId: 'publisher-2027' });
   const authority = keygen({ out: authorityKey, keyId: 'revocations-2026' });
   keygen({ out: otherAuthorityKey, keyId: 'revocations-2026' });
-  const entry = (slug, version = '1.0.0') => ({ slug, version, sha256, archiveUrl: `https://registry.test/v1/skills/${slug}/releases/${version}/archive` });
-  const sign = (signer, slug, version = '1.0.0') => ({ keyId: signer.keyId, value: signRelease({ key: signer.file, keyId: signer.keyId, slug, version, sha256 }).signature });
+  const entry = (slug, version = '1.0.0', content = slug) => { served.set(`${slug}@${version}`, content); return { slug, version, sha256: shaOf(content), archiveUrl: `https://registry.test/v1/skills/${slug}/releases/${version}/archive` }; };
+  const contentOf = (slug, version) => served.get(`${slug}@${version}`) ?? slug;
+  const sign = (signer, slug, version = '1.0.0') => ({ keyId: signer.keyId, value: signRelease({ key: signer.file, keyId: signer.keyId, slug, version, sha256: shaOf(contentOf(slug, version)) }).signature });
   const signers = { current: { file: publisherKey, keyId: publisher.keyId }, next: { file: newPublisherKey, keyId: newPublisher.keyId } };
   const list = (sequence, { keys = [], releases = [], expiresAt = null, issuedAt, key = authorityKey } = {}) => signRevocations({ key, keyId: 'revocations-2026', list: { sequence, expiresAt, keys, releases, ...(issuedAt ? { issuedAt } : {}) } });
   const state = { manifest: [], signatures: {}, revocations: list(1), receipts: [], requests: [] };
@@ -308,13 +316,14 @@ function revocationFixture() {
     if (path.endsWith('/manifest')) return Response.json({ schemaVersion: 1, skills: state.manifest });
     if (path === '/v1/revocations') { assert.equal(init.headers.authorization, 'Bearer tok'); return state.revocations ? Response.json({ sequence: 0, ...state.revocations }) : Response.json({ error: { code: 'revocations_unpublished' } }, { status: 404 }); }
     const metadata = /^\/v1\/skills\/([a-z-]+)\/releases\/([0-9.]+)$/.exec(path);
-    if (metadata) return Response.json({ slug: metadata[1], version: metadata[2], sha256, signature: state.signatures[metadata[1]] ?? null });
+    if (metadata) return Response.json({ slug: metadata[1], version: metadata[2], sha256: shaOf(contentOf(metadata[1], metadata[2])), signature: state.signatures[metadata[1]] ?? null });
     if (path.startsWith('/v1/agent/receipts/')) { state.receipts.push(JSON.parse(init.body)); return Response.json({ ok: true }); }
-    return new Response(bytes);
+    const archive = /^\/v1\/skills\/([a-z-]+)\/releases\/([^/]+)\/archive$/.exec(path);
+    return new Response(pack(contentOf(archive[1], archive[2])));
   };
   let restarts = 0;
   const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, target: 'agent-1', token: 'tok', restart: () => { restarts++; }, revocationKeys: parsePublisherKeys(JSON.stringify([authority])) };
-  return { f, sha256, publisher, newPublisher, signers, otherAuthorityKey, entry, sign, list, state, options, restarts: () => restarts, publisherKeys: parsePublisherKeys(JSON.stringify([publisher, newPublisher])) };
+  return { f, sha256, shaOf, contentOf, publisher, newPublisher, signers, otherAuthorityKey, entry, sign, list, state, options, restarts: () => restarts, publisherKeys: parsePublisherKeys(JSON.stringify([publisher, newPublisher])) };
 }
 
 test('pinned revocation keys fail closed on a missing, foreign, altered or expired list before anything is activated', async () => {
@@ -351,13 +360,13 @@ test('the bridge keeps the highest revocation sequence and refuses a rolled-back
     assert.equal(saved.revocations.sequence, 2);
     r.state.revocations = r.list(1);
     await assert.rejects(syncSkills(r.options), /older than list 2/);
-    r.state.revocations = r.list(2, { releases: [{ slug: 'other', version: '1.0.0', sha256: r.sha256, reason: 'Synthetic swap' }] });
+    r.state.revocations = r.list(2, { releases: [{ slug: 'other', version: '1.0.0', sha256: r.shaOf('other'), reason: 'Synthetic swap' }] });
     await assert.rejects(syncSkills(r.options), /different revocation list 2/);
     r.state.revocations = r.list(3);
     await syncSkills(r.options);
     // A list seen once is remembered even when the sync then fails.
     r.state.manifest = [r.entry('fixture'), r.entry('incoming')];
-    r.state.revocations = r.list(4, { releases: [{ slug: 'incoming', version: '1.0.0', sha256: r.sha256, reason: 'Synthetic incident' }] });
+    r.state.revocations = r.list(4, { releases: [{ slug: 'incoming', version: '1.0.0', sha256: r.shaOf('incoming'), reason: 'Synthetic incident' }] });
     await assert.rejects(syncSkills(r.options), /Refused revoked releases: incoming/);
     r.state.revocations = r.list(3);
     await assert.rejects(syncSkills(r.options), /older than list 4/);
@@ -447,5 +456,84 @@ test('signed revocation lists are validated exactly', () => {
       { sequence: 1, keys: [], releases: [], expiresAt: '2000-01-01T00:00:00Z' },
     ];
     for (const list of bad) assert.throws(() => signRevocations({ key: join(r.f.root, 'authority.pem'), keyId: 'revocations-2026', list }), Error, JSON.stringify(list));
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+// Regression: revoked code must not survive under another label or behind a withheld signature.
+function relabelFixture() {
+  const r = revocationFixture();
+  const signatures = {};
+  const base = r.options.fetchImpl;
+  r.options.fetchImpl = async (url, init) => {
+    const metadata = /^\/v1\/skills\/([a-z-]+)\/releases\/([^/]+)$/.exec(new URL(url).pathname);
+    if (metadata && !metadata[2].endsWith('/archive')) return Response.json({ slug: metadata[1], version: metadata[2], sha256: r.entry(metadata[1], metadata[2], r.contentOf(metadata[1], metadata[2])).sha256, signature: signatures[`${metadata[1]}@${metadata[2]}`] ?? null });
+    return base(url, init);
+  };
+  return { ...r, signatures, options: { ...r.options, publisherKeys: r.publisherKeys } };
+}
+
+test('a revoked release relabelled as another version with the same bytes stays revoked', async () => {
+  const r = relabelFixture();
+  try {
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    r.signatures['evil@1.0.0'] = r.sign(r.signers.current, 'evil');
+    await syncSkills(r.options);
+    r.state.revocations = r.list(2, { releases: [{ slug: 'evil', version: '1.0.0', sha256: r.shaOf('evil'), reason: 'Synthetic malware' }] });
+    r.state.manifest = [r.entry('evil', '1.0.0-x', 'evil')];
+    await assert.rejects(syncSkills(r.options), /Quarantined installed skills whose release or signing key is revoked: evil/);
+    assert.equal(existsSync(join(r.options.hermesHome, 'skills/registry/evil')), false, 'revoked code no longer active');
+    // Offered again under yet another name, the digest still matches and it is refused before download.
+    r.state.manifest = [r.entry('renamed', '9.9.9', 'evil')];
+    r.state.requests.length = 0;
+    await assert.rejects(syncSkills(r.options), /Refused revoked releases: renamed 9\.9\.9/);
+    assert.equal(r.state.requests.some((path) => path.endsWith('/archive')), false);
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+test('an installed release relabelled without revocation keys pinned for publishers is still checked against the installed record', async () => {
+  const r = revocationFixture();
+  try {
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    await syncSkills(r.options);
+    r.state.revocations = r.list(2, { releases: [{ slug: 'evil', version: '1.0.0', sha256: 'f'.repeat(64), reason: 'Synthetic incident' }] });
+    r.state.manifest = [r.entry('evil', '1.0.0-x')];
+    await assert.rejects(syncSkills(r.options), /Quarantined installed skills .*evil 1\.0\.0 \(release revoked/);
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+test('withholding the signature of an installed release whose key was revoked does not downgrade it to unsigned', async () => {
+  const r = relabelFixture();
+  try {
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    r.signatures['evil@1.0.0'] = r.sign(r.signers.current, 'evil');
+    await syncSkills(r.options);
+    r.state.revocations = r.list(2, { keys: [{ keyId: 'publisher-2026', publicKey: r.publisher.publicKey, reason: 'Synthetic key theft' }] });
+    delete r.signatures['evil@1.0.0'];
+    await assert.rejects(syncSkills(r.options), /Quarantined installed skills whose release or signing key is revoked: evil 1\.0\.0 \(signing key publisher-2026 revoked/);
+    assert.equal(existsSync(join(r.options.hermesHome, 'skills/registry/evil')), false);
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+test('a key is revoked by its public key, under any key id', async () => {
+  const r = relabelFixture();
+  try {
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    r.signatures['evil@1.0.0'] = r.sign(r.signers.current, 'evil');
+    await syncSkills(r.options);
+    r.state.revocations = r.list(2, { keys: [{ keyId: 'some-other-id', publicKey: r.publisher.publicKey, reason: 'Synthetic key theft' }] });
+    await assert.rejects(syncSkills(r.options), /Quarantined installed skills .*signing key publisher-2026 revoked/);
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+test('a pinned minimum revocation sequence survives a lost state file', async () => {
+  const r = revocationFixture();
+  try {
+    r.state.manifest = [r.entry('fixture')];
+    r.state.revocations = r.list(1);
+    await assert.rejects(syncSkills({ ...r.options, minRevocationSequence: 2 }), /older than the pinned minimum 2/);
+    r.state.revocations = r.list(2);
+    await syncSkills({ ...r.options, minRevocationSequence: 2 });
+    await assert.rejects(syncSkills({ ...r.options, minRevocationSequence: -1 }), /non-negative integer/);
+    await assert.rejects(syncSkills({ ...r.options, revocationKeys: new Map(), minRevocationSequence: 2 }), /needs HIVE_SKILLS_REVOCATION_KEYS/);
   } finally { rmSync(r.f.root, { recursive: true, force: true }); }
 });

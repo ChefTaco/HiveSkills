@@ -8,7 +8,7 @@ import type { HiveEventRecords } from './hive-events.js';
 import { EVENT_AUDIT_ACTIONS, EVENT_DEPLOYMENT_STATUSES } from './hive-events.js';
 import { TARGET_ACTIONS, type AuditExportRow } from './audit-export.js';
 import type { DeploymentTarget, ListedTarget, Release, ReleaseAdvisory, ReleaseSignature, Session, Skill, TargetBinding } from './types.js';
-import { parseRevocationPayload, type RevocationList } from '../scripts/archive-utils.mjs';
+import { keyRevocation, parseRevocationPayload, releaseRevocation, type RevocationList } from '../scripts/archive-utils.mjs';
 import { buildEntry, entryHash, GENESIS_HASH, type LogHead, type LogKind, type LogRow } from '../scripts/transparency-log.mjs';
 import { logKey, signEntry, signHead } from './transparency.js';
 if (!existsSync(config.databasePath)) throw new Error('Skills database is missing; run hive-skills migrate before opening storage');
@@ -55,6 +55,41 @@ export type StoredRevocations = { sequence: number; payload: string; payloadSha2
 let parsedRevocations: { sequence: number; list: RevocationList } | undefined;
 /** A later revocation list arrived while this one was being published. */
 export class RevocationSequenceError extends Error {}
+/** A release the registry must not store: `status` is the HTTP status to answer with. */
+export class ReleaseRefusedError extends Error {
+  constructor(message: string, readonly status: 400 | 409) { super(message); }
+}
+/** The current revocation list, parsed once per sequence. */
+const currentRevocations = (): RevocationList | null => {
+  const row = db.prepare('SELECT sequence,payload FROM revocation_lists ORDER BY sequence DESC LIMIT 1').get() as { sequence: number; payload: string } | undefined;
+  if (!row) return null;
+  if (parsedRevocations?.sequence !== row.sequence) parsedRevocations = { sequence: row.sequence, list: parseRevocationPayload(row.payload) };
+  return parsedRevocations.list;
+};
+/** True when a pinned publisher key whose public key the list revokes made this signature. */
+const signedByRevokedKey = (list: RevocationList | null, keyId: string | null | undefined): boolean =>
+  Boolean(list && keyId && keyRevocation(list, config.publisherKeys.get(keyId)));
+/** Every `release.published` entry ever logged for this exact release (it may have been deleted since). */
+const loggedPublication = (slug: string, version: string): boolean =>
+  Boolean(db.prepare("SELECT 1 FROM transparency_log WHERE json_extract(entry,'$.kind')='release.published' AND json_extract(entry,'$.subject.slug')=? AND json_extract(entry,'$.subject.version')=? LIMIT 1").get(slug, version));
+/**
+ * Withdraw from their channels every release the list revokes (by slug and version or by digest) and
+ * every release signed by a pinned key it revokes, auditing each as an automatic withdrawal.
+ */
+const withdrawRevoked = (list: RevocationList | null): Array<{ slug: string; version: string; channel: string }> => {
+  if (!list) return [];
+  const promoted = db.prepare('SELECT c.channel,c.skill_slug,c.version,r.sha256,s.key_id FROM channel_releases c JOIN releases r ON r.skill_slug=c.skill_slug AND r.version=c.version LEFT JOIN release_signatures s ON s.skill_slug=c.skill_slug AND s.version=c.version ORDER BY c.channel,c.skill_slug').all() as Array<{ channel: string; skill_slug: string; version: string; sha256: string; key_id: string | null }>;
+  const withdrawn: Array<{ slug: string; version: string; channel: string }> = [];
+  for (const row of promoted) {
+    const release = releaseRevocation(list, { slug: row.skill_slug, version: row.version, sha256: row.sha256 });
+    const key = !release && signedByRevokedKey(list, row.key_id);
+    if (!release && !key) continue;
+    db.prepare('DELETE FROM channel_releases WHERE channel=? AND skill_slug=?').run(row.channel, row.skill_slug);
+    withdrawn.push({ slug: row.skill_slug, version: row.version, channel: row.channel });
+    store.audit('system', 'release.withdraw', row.skill_slug, { channel: row.channel, version: row.version, automatic: 'revoked', ...(key ? { revokedKeyId: row.key_id } : {}), sequence: list.sequence });
+  }
+  return withdrawn;
+};
 
 export const deploymentJournal = new DeploymentJournal(db);
 export const store = {
@@ -84,10 +119,25 @@ export const store = {
     const current = store.getSkill(slug); if (!current) return undefined;
     db.prepare('UPDATE skills SET name=?, description=?, homepage=?, enabled=?, updated_at=? WHERE slug=?').run(patch.name ?? current.name, patch.description ?? current.description, patch.homepage === undefined ? current.homepage : patch.homepage, Number(patch.enabled ?? current.enabled), now(), slug); return store.getSkill(slug);
   },
-  deleteSkill: (slug: string): boolean => db.prepare('DELETE FROM skills WHERE slug = ?').run(slug).changes === 1,
+  /** Deleting a skill deletes its releases; the transparency log records which (`skill.deleted`). */
+  deleteSkill: (slug: string): boolean => transaction(() => {
+    const releases = db.prepare('SELECT version,sha256 FROM releases WHERE skill_slug=? ORDER BY created_at,version').all(slug) as Array<{ version: string; sha256: string }>;
+    if (db.prepare('DELETE FROM skills WHERE slug = ?').run(slug).changes !== 1) return false;
+    if (releases.length) appendLog('skill.deleted', { slug, releases: releases.map((row) => ({ version: row.version, sha256: row.sha256 })) });
+    return true;
+  }),
   /** Insert a release and, when given, its verified publisher signature, in one transaction. */
   /** Its transparency log entry (`release.published`) is appended in the same transaction. */
+  /**
+   * Refused, inside the transaction so a revocation list published meanwhile counts: a version ever
+   * logged before (also after its skill was deleted), a revoked release (by version or digest) and a
+   * signature by a revoked key.
+   */
   addRelease: (release: Release, signature?: ReleaseSignature | null): void => transaction(() => {
+    if (loggedPublication(release.skillSlug, release.version)) throw new ReleaseRefusedError('This version was published before and is in the transparency log; releases are immutable, so choose a new version', 409);
+    const revocations = currentRevocations();
+    if (releaseRevocation(revocations, { slug: release.skillSlug, version: release.version, sha256: release.sha256 })) throw new ReleaseRefusedError('This release version or archive is revoked', 409);
+    if (signature && signedByRevokedKey(revocations, signature.keyId)) throw new ReleaseRefusedError('This publisher key is revoked', 400);
     db.prepare('INSERT INTO releases(skill_slug,version,sha256,archive_path,notes,created_at,min_hermes_version,max_hermes_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(release.skillSlug, release.version, release.sha256, release.archivePath, release.notes, release.createdAt, release.minHermesVersion ?? null, release.maxHermesVersion ?? null);
     if (signature) writeSignature(release.skillSlug, release.version, signature);
     appendLog('release.published', { slug: release.skillSlug, version: release.version, sha256: release.sha256, signature: signature ? { keyId: signature.keyId, value: signature.value } : null });
@@ -127,6 +177,7 @@ export const store = {
   setReleaseSignature: (slug: string, version: string, signature: ReleaseSignature): void => transaction(() => {
     const release = store.getRelease(slug, version);
     if (!release) throw new Error('Release not found');
+    if (signedByRevokedKey(currentRevocations(), signature.keyId)) throw new ReleaseRefusedError('This publisher key is revoked', 400);
     writeSignature(slug, version, signature);
     appendLog('release.signed', { slug, version, sha256: release.sha256, signature: { keyId: signature.keyId, value: signature.value } });
   }),
@@ -136,31 +187,27 @@ export const store = {
     return row ? { sequence: row.sequence, payload: row.payload, payloadSha256: row.payload_sha256, signature: { keyId: row.key_id, value: row.signature }, actor: row.actor, publishedAt: row.created_at } : null;
   },
   /** The current revocation list, parsed (cached per sequence), or null before the first. */
-  revocations: (): RevocationList | null => {
-    const stored = store.storedRevocations();
-    if (!stored) return null;
-    if (parsedRevocations?.sequence !== stored.sequence) parsedRevocations = { sequence: stored.sequence, list: parseRevocationPayload(stored.payload) };
-    return parsedRevocations.list;
+  revocations: (): RevocationList | null => currentRevocations(),
+  /** True when the transparency log ever recorded this exact release as published. */
+  versionLogged: (slug: string, version: string): boolean => loggedPublication(slug, version),
+  /** A stored revocation list by sequence, as served, or null. */
+  storedRevocationList: (sequence: number): StoredRevocations | null => {
+    const row = db.prepare('SELECT * FROM revocation_lists WHERE sequence=?').get(sequence) as RevocationRow | undefined;
+    return row ? { sequence: row.sequence, payload: row.payload, payloadSha256: row.payload_sha256, signature: { keyId: row.key_id, value: row.signature }, actor: row.actor, publishedAt: row.created_at } : null;
   },
   /**
-   * Store a verified revocation list whose sequence is above the current one, log it and withdraw
-   * every revoked release from the channels it is promoted on (audited as automatic withdrawals),
-   * all in one transaction. Returns the withdrawals.
+   * Store a verified revocation list whose sequence is above the current one, log it (its digest and
+   * signature; the payload is served by sequence) and withdraw every revoked release, and every
+   * release signed by a revoked pinned key, from its channels (audited as automatic withdrawals), all
+   * in one transaction. Returns the withdrawals.
    */
   publishRevocations: (envelope: { payload: string; signature: ReleaseSignature }, list: RevocationList, actor: string): Array<{ slug: string; version: string; channel: string }> => transaction(() => {
     const current = db.prepare('SELECT MAX(sequence) AS sequence FROM revocation_lists').get() as { sequence: number | null };
     if (current.sequence !== null && list.sequence <= current.sequence) throw new RevocationSequenceError(`Revocation list sequence must be above ${current.sequence}`);
     const payloadSha256 = sha256(envelope.payload);
     db.prepare('INSERT INTO revocation_lists VALUES (?,?,?,?,?,?,?)').run(list.sequence, envelope.payload, payloadSha256, envelope.signature.keyId, envelope.signature.value, actor, now());
-    appendLog('revocations.published', { sequence: list.sequence, payloadSha256, payload: envelope.payload, signature: { keyId: envelope.signature.keyId, value: envelope.signature.value } });
-    const withdrawn: Array<{ slug: string; version: string; channel: string }> = [];
-    for (const revoked of list.releases) {
-      const channels = db.prepare('DELETE FROM channel_releases WHERE skill_slug=? AND version=? RETURNING channel').all(revoked.slug, revoked.version) as Array<{ channel: string }>;
-      for (const { channel } of channels) {
-        withdrawn.push({ slug: revoked.slug, version: revoked.version, channel });
-        store.audit('system', 'release.withdraw', revoked.slug, { channel, version: revoked.version, automatic: 'revoked', sequence: list.sequence });
-      }
-    }
+    appendLog('revocations.published', { sequence: list.sequence, payloadSha256, signature: { keyId: envelope.signature.keyId, value: envelope.signature.value } });
+    const withdrawn = withdrawRevoked(list);
     store.audit(actor, 'revocations.publish', String(list.sequence), { sequence: list.sequence, signatureKeyId: envelope.signature.keyId, keys: list.keys.length, releases: list.releases.length, withdrawn: withdrawn.length });
     return withdrawn;
   }),
@@ -170,26 +217,59 @@ export const store = {
     const last = db.prepare('SELECT log_index,hash FROM transparency_log ORDER BY log_index DESC LIMIT 1').get() as { log_index: number; hash: string } | undefined;
     const size = last ? last.log_index + 1 : 0;
     const headHash = last?.hash ?? GENESIS_HASH;
-    return { size, headHash, logKey: { keyId: key.keyId, publicKey: key.publicKey }, signature: signHead(key, size, headHash) };
+    const signedAt = now();
+    return { size, headHash, signedAt, logKey: { keyId: key.keyId, publicKey: key.publicKey }, signature: signHead(key, size, headHash, signedAt) };
   },
-  /** Up to `limit` log entries from index `from` on, oldest first. */
-  transparencyEntries: (from: number, limit: number): LogRow[] =>
-    (db.prepare('SELECT log_index,entry,hash,key_id,signature FROM transparency_log WHERE log_index>=? ORDER BY log_index LIMIT ?').all(from, limit) as Array<{ log_index: number; entry: string; hash: string; key_id: string; signature: string }>)
-      .map((row) => ({ index: row.log_index, entry: row.entry, hash: row.hash, keyId: row.key_id, signature: row.signature })),
   /**
-   * Record releases stored before the log existed, once: when the log is empty, every release is
-   * appended (oldest first, marked `backfilled`) with the signature it has now. Returns the count.
+   * Log entries from index `from` on, oldest first: up to `limit` entries and, past the first, no
+   * more than `maxBytes` of entry text, so a page stays bounded whatever the entries hold.
    */
-  backfillTransparencyLog: (): number => {
-    if (db.prepare('SELECT 1 FROM transparency_log LIMIT 1').get()) return 0;
-    const rows = db.prepare('SELECT r.skill_slug,r.version,r.sha256,s.key_id,s.signature FROM releases r LEFT JOIN release_signatures s ON s.skill_slug=r.skill_slug AND s.version=r.version ORDER BY r.created_at,r.skill_slug,r.version').all() as Array<{ skill_slug: string; version: string; sha256: string; key_id: string | null; signature: string | null }>;
-    if (!rows.length) return 0;
-    return transaction(() => {
-      if (db.prepare('SELECT 1 FROM transparency_log LIMIT 1').get()) return 0;
-      for (const row of rows) appendLog('release.published', { slug: row.skill_slug, version: row.version, sha256: row.sha256, signature: row.key_id && row.signature ? { keyId: row.key_id, value: row.signature } : null, backfilled: true });
-      return rows.length;
-    });
+  transparencyEntries: (from: number, limit: number, maxBytes = 4 * 1024 * 1024): LogRow[] => {
+    const rows: LogRow[] = [];
+    let bytes = 0;
+    for (const row of db.prepare('SELECT log_index,entry,hash,key_id,signature FROM transparency_log WHERE log_index>=? ORDER BY log_index LIMIT ?').iterate(from, limit) as Iterable<{ log_index: number; entry: string; hash: string; key_id: string; signature: string }>) {
+      bytes += row.entry.length;
+      if (rows.length && bytes > maxBytes) break;
+      rows.push({ index: row.log_index, entry: row.entry, hash: row.hash, keyId: row.key_id, signature: row.signature });
+    }
+    return rows;
   },
+  /**
+   * Bring the log and the channels in line with the database, on every start. Whatever was stored
+   * without a log entry (before the log existed, or by a restored or older binary) is recorded,
+   * marked `backfilled`: releases never logged, signatures that differ from the last logged one, and
+   * logged releases that are gone (as `skill.deleted`). A logged release whose digest no longer
+   * matches is recorded as deleted and published again. Then revoked releases that are promoted are
+   * withdrawn again. Returns the number of entries appended.
+   */
+  reconcileTransparencyLog: (): { appended: number; withdrawn: number } => transaction(() => {
+    type Logged = { sha256: string; signature: string | null };
+    const logged = new Map<string, Logged>();
+    let before = 0;
+    for (const row of db.prepare('SELECT entry FROM transparency_log ORDER BY log_index').iterate() as Iterable<{ entry: string }>) {
+      before++;
+      const entry = JSON.parse(row.entry) as { kind: string; subject: { slug: string; version?: string; sha256?: string; signature?: { keyId: string; value: string } | null; releases?: Array<{ version: string }> } };
+      const id = `${entry.subject.slug}@${entry.subject.version}`;
+      if (entry.kind === 'release.published') logged.set(id, { sha256: entry.subject.sha256!, signature: entry.subject.signature ? `${entry.subject.signature.keyId}:${entry.subject.signature.value}` : null });
+      else if (entry.kind === 'release.signed') logged.set(id, { ...logged.get(id)!, signature: `${entry.subject.signature!.keyId}:${entry.subject.signature!.value}` });
+      else if (entry.kind === 'skill.deleted') for (const release of entry.subject.releases ?? []) logged.delete(`${entry.subject.slug}@${release.version}`);
+    }
+    const rows = db.prepare('SELECT r.skill_slug,r.version,r.sha256,s.key_id,s.signature FROM releases r LEFT JOIN release_signatures s ON s.skill_slug=r.skill_slug AND s.version=r.version ORDER BY r.created_at,r.skill_slug,r.version').all() as Array<{ skill_slug: string; version: string; sha256: string; key_id: string | null; signature: string | null }>;
+    const present = new Set(rows.map((row) => `${row.skill_slug}@${row.version}`));
+    const gone = new Map<string, Array<{ version: string; sha256: string }>>();
+    const forget = (slug: string, version: string, digest: string) => gone.set(slug, [...(gone.get(slug) ?? []), { version, sha256: digest }]);
+    for (const [id, entry] of logged) if (!present.has(id)) { const at = id.lastIndexOf('@'); forget(id.slice(0, at), id.slice(at + 1), entry.sha256); }
+    for (const row of rows) { const entry = logged.get(`${row.skill_slug}@${row.version}`); if (entry && entry.sha256 !== row.sha256) forget(row.skill_slug, row.version, entry.sha256); }
+    for (const [slug, releases] of gone) appendLog('skill.deleted', { slug, releases, backfilled: true });
+    for (const row of rows) {
+      const entry = logged.get(`${row.skill_slug}@${row.version}`);
+      const signature = row.key_id && row.signature ? { keyId: row.key_id, value: row.signature } : null;
+      if (!entry || entry.sha256 !== row.sha256) appendLog('release.published', { slug: row.skill_slug, version: row.version, sha256: row.sha256, signature, backfilled: true });
+      else if (signature && entry.signature !== `${signature.keyId}:${signature.value}`) appendLog('release.signed', { slug: row.skill_slug, version: row.version, sha256: row.sha256, signature, backfilled: true });
+    }
+    const after = (db.prepare('SELECT COUNT(*) AS count FROM transparency_log').get() as { count: number }).count;
+    return { appended: after - before, withdrawn: withdrawRevoked(currentRevocations()).length };
+  }),
   /** Every release with its signature and channels, newest first, for the signature overview. */
   signedReleases: (limit: number): Array<{ slug: string; version: string; sha256: string; createdAt: string; signature: ReleaseSignature | null; channels: string[] }> => {
     const channels = new Map<string, string[]>();

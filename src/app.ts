@@ -21,7 +21,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { config } from './config.js';
 import { persistArchive, assertSkillId, removeArchive } from './archive.js';
 import { authenticateOsUser, createSession, readAuth, removeSession, sessionCookie, validUsername } from './auth.js';
-import { store, deploymentJournal, RevocationSequenceError } from './db.js';
+import { store, deploymentJournal, ReleaseRefusedError, RevocationSequenceError } from './db.js';
 import { requireMagnusExecutor, executeMagnusJob, journalStatus, magnusExecutorConfiguration } from './magnus-deployment.js';
 import { type Publication } from './deployment-journal.js';
 import { z } from 'zod';
@@ -184,13 +184,19 @@ app.use('*', (c, next) => {
 });
 
 for (const target of config.targets) store.seedTarget(target);
-// Releases stored before the transparency log existed are recorded once, marked as backfilled.
+// On every start, record in the transparency log what was stored without an entry (releases from
+// before the log, or written by a restored or older binary), and withdraw revoked releases again.
 try {
-  const backfilled = store.backfillTransparencyLog();
-  if (backfilled) console.log(`transparency log: recorded ${backfilled} existing release(s)`);
+  const { appended, withdrawn } = store.reconcileTransparencyLog();
+  if (appended || withdrawn) console.log(`transparency log: recorded ${appended} backfilled entr${appended === 1 ? 'y' : 'ies'}; withdrew ${withdrawn} revoked release promotion(s)`);
 } catch (error) {
-  console.error('transparency log backfill failed', error);
+  console.error('transparency log reconciliation failed', error);
 }
+/** A refusal from the store becomes the HTTP answer it names. */
+const refusal = (error: unknown): never => {
+  if (error instanceof ReleaseRefusedError) throw new HTTPException(error.status, { message: error.message });
+  throw error;
+};
 
 // nosniff, no-referrer and frame DENY, set before each handler runs.
 app.use('*', securityHeaders());
@@ -490,7 +496,7 @@ app.delete('/admin/skills/:slug', requireAuth(true), (c) => {
 /** A publisher signature must verify against a configured key, for exactly this release. */
 const assertSignature = (skillSlug: string, version: string, sha256: string, signature: ReleaseSignature, cleanup: () => void = () => {}): void => {
   if (!config.publisherKeys.has(signature.keyId)) { cleanup(); throw new HTTPException(400, { message: 'Unknown publisher key' }); }
-  if (keyRevocation(store.revocations(), signature.keyId, config.publisherKeys.get(signature.keyId))) { cleanup(); throw new HTTPException(400, { message: 'This publisher key is revoked' }); }
+  if (keyRevocation(store.revocations(), config.publisherKeys.get(signature.keyId))) { cleanup(); throw new HTTPException(400, { message: 'This publisher key is revoked' }); }
   if (!verifyReleaseSignature(config.publisherKeys, { slug: skillSlug, version, sha256 }, signature)) { cleanup(); throw new HTTPException(400, { message: 'Release signature does not verify' }); }
 };
 
@@ -518,7 +524,9 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
     throw new HTTPException(400, { message: error instanceof Error ? error.message : 'Invalid version' });
   }
   if (store.getRelease(skillId, version)) throw new HTTPException(409, { message: 'Releases are immutable; this version already exists' });
-  if (releaseRevocation(store.revocations(), skillId, version)) throw new HTTPException(409, { message: 'This release version is revoked' });
+  // Checked again, with the digest, in the transaction that stores the release.
+  if (releaseRevocation(store.revocations(), { slug: skillId, version })) throw new HTTPException(409, { message: 'This release version or archive is revoked' });
+  if (store.versionLogged(skillId, version)) throw new HTTPException(409, { message: 'This version was published before and is in the transparency log; releases are immutable, so choose a new version' });
   const minHermesVersion = optionalText(body.minHermesVersion, 'minHermesVersion', 64);
   const maxHermesVersion = optionalText(body.maxHermesVersion, 'maxHermesVersion', 64);
   try {
@@ -555,7 +563,7 @@ app.post('/admin/skills/:slug/releases', requireAuth(true), async (c) => {
     store.addRelease(release, signature);
   } catch (error) {
     removeArchive(persisted.path);
-    throw error;
+    refusal(error);
   }
   store.audit(c.get('auth').username, 'release.create', `${skillId}@${version}`, { sha256: persisted.sha256, minHermesVersion, maxHermesVersion, ...(signature ? { signatureKeyId: signature.keyId } : {}) });
   return c.json(BrowserRelease.parse({ ...release, signature }), 201);
@@ -570,7 +578,7 @@ app.put('/admin/skills/:slug/releases/:version/signature', requireAuth(true), as
   if (!release) throw new HTTPException(404, { message: 'Release not found' });
   const signature = browserInput(SetReleaseSignature, await requestJson(c));
   assertSignature(skillSlug, version, release.sha256, signature);
-  store.setReleaseSignature(skillSlug, version, signature);
+  try { store.setReleaseSignature(skillSlug, version, signature); } catch (error) { refusal(error); }
   store.audit(c.get('auth').username, 'release.sign', `${skillSlug}@${version}`, { signatureKeyId: signature.keyId });
   return c.json(signature);
 });
@@ -650,7 +658,10 @@ app.put('/admin/channels/:channel/:slug', requireAuth(true), async (c) => {
   const skill = c.req.param('slug');
   if (!store.getRelease(skill, version)) throw new HTTPException(404, { message: 'Release not found' });
   if (store.releaseAdvisory(skill, version)?.level === 'yanked') throw new HTTPException(409, { message: 'A yanked release cannot be promoted' });
-  if (releaseRevocation(store.revocations(), skill, version)) throw new HTTPException(409, { message: 'A revoked release cannot be promoted' });
+  const revocations = store.revocations();
+  if (releaseRevocation(revocations, { slug: skill, version, sha256: store.getRelease(skill, version)!.sha256 })) throw new HTTPException(409, { message: 'A revoked release cannot be promoted' });
+  const signedBy = store.releaseSignature(skill, version)?.keyId;
+  if (signedBy && keyRevocation(revocations, config.publisherKeys.get(signedBy))) throw new HTTPException(409, { message: 'A release signed by a revoked publisher key cannot be promoted; sign it with a valid key first' });
   store.promoteRelease(skill, version, channel);
   store.audit(c.get('auth').username, 'release.promote', skill, { channel, version });
   return c.json({ ok: true });
@@ -807,6 +818,17 @@ app.get('/v1/revocations', requireTrustReader, (c) => {
   return c.json(SignedRevocationList.parse({ sequence: stored.sequence, payload: stored.payload, payloadSha256: stored.payloadSha256, signature: stored.signature, publishedAt: stored.publishedAt }));
 });
 
+// Any stored revocation list by sequence, exactly as signed: the transparency log records each list's
+// digest, and verifiers fetch the payloads here.
+app.get('/v1/revocations/:sequence', requireTrustReader, (c) => {
+  const sequence = Number(c.req.param('sequence'));
+  if (!Number.isSafeInteger(sequence) || sequence < 1 || String(sequence) !== c.req.param('sequence')) throw new HTTPException(400, { message: 'Invalid revocation list sequence' });
+  const stored = store.storedRevocationList(sequence);
+  if (!stored) throw new HTTPException(404, { message: 'No revocation list has this sequence' });
+  c.header('Cache-Control', 'no-store');
+  return c.json(SignedRevocationList.parse({ sequence: stored.sequence, payload: stored.payload, payloadSha256: stored.payloadSha256, signature: stored.signature, publishedAt: stored.publishedAt }));
+});
+
 // Publish a revocation list signed by a pinned revocation key (HIVE_SKILLS_REVOCATION_KEYS). Its
 // sequence must be above the current one and it must not have expired. Revoked releases are withdrawn
 // from their channels; revoked publisher keys can no longer sign releases here.
@@ -841,17 +863,19 @@ app.get('/v1/transparency/entries', requireTrustReader, (c) => {
   const entries = store.transparencyEntries(from, limit);
   const last = entries.at(-1);
   c.header('Cache-Control', 'no-store');
-  return c.json(TransparencyEntries.parse({ entries, nextFrom: entries.length === limit && last ? last.index + 1 : null }));
+  // A page can end early at its byte limit, so whether more follow is asked, not inferred.
+  const more = last !== undefined && store.transparencyEntries(last.index + 1, 1).length > 0;
+  return c.json(TransparencyEntries.parse({ entries, nextFrom: more ? last.index + 1 : null }));
 });
 
 /** The signature status of one release against this registry's pinned keys and revocation list. */
 const signatureStatus = (release: { slug: string; version: string; sha256: string; signature: ReleaseSignature | null }, revocations: RevocationList | null) => {
-  if (releaseRevocation(revocations, release.slug, release.version)) return 'revoked' as const;
+  if (releaseRevocation(revocations, release)) return 'revoked' as const;
   if (!release.signature) return 'unsigned' as const;
   const key = config.publisherKeys.get(release.signature.keyId);
   if (!key) return 'unknown_key' as const;
   if (!verifyReleaseSignature(config.publisherKeys, release, release.signature)) return 'invalid' as const;
-  return keyRevocation(revocations, release.signature.keyId, key) ? 'revoked_key' as const : 'verified' as const;
+  return keyRevocation(revocations, key) ? 'revoked_key' as const : 'verified' as const;
 };
 export const SIGNATURE_OVERVIEW_RELEASES = 1000;
 
@@ -865,7 +889,7 @@ app.get('/admin/signatures', requireAuth(true), (c) => {
   return c.json(SignatureOverview.parse({
     requireSignedReleases: config.requireSignedReleases,
     publisherKeys: [...config.publisherKeys].map(([keyId, key]) => {
-      const revoked = keyRevocation(revocations, keyId, key);
+      const revoked = keyRevocation(revocations, key);
       return { keyId, publicKey: rawPublicKey(key), revocation: revoked ? { reason: revoked.reason, revokedAt: revoked.revokedAt } : null };
     }),
     revocationKeys: [...config.revocationKeys].map(([keyId, key]) => ({ keyId, publicKey: rawPublicKey(key) })),

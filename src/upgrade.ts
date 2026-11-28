@@ -67,14 +67,18 @@ export const SKILLS_MIGRATIONS: Release['migrations'] = [
   {
     component: 'skills',
     id: 'managed-format-6',
-    checksum: '15a62552b54d699369fa5ada7af40cb5abb71fb9cb1d5ebbe1f996803bca6f9a',
+    checksum: '0e62f66c9c66c9d840c8c9cbf7c52c2ab4d5f7e979c6e58324da92b21ff4fef1',
     impact: 'fast',
-    readableBy: '^1.1.0',
-    note: 'Add signed revocation lists and the append-only transparency log in new tables; release rows and older binaries are unaffected.',
+    readableBy: '^1.12.0',
+    note: 'Add signed revocation lists and the append-only transparency log in new tables. Older binaries would store releases without logging them, so they refuse this data; roll back by restoring the pre-upgrade backup.',
   },
 ];
-/** The oldest HiveSkills whose code reads data written by this one. */
-export const SKILLS_DATA_COMPATIBILITY = '^1.1.0';
+/**
+ * The oldest HiveSkills whose code reads data written by this one. 1.12.0 is the first release that
+ * keeps the transparency log and enforces revocations: an older binary would store and promote
+ * releases without either, so it must refuse this data (restore the pre-upgrade backup to roll back).
+ */
+export const SKILLS_DATA_COMPATIBILITY = '^1.12.0';
 
 /** This package's own release record for the migration engine, versioned with the package. */
 export function skillsRelease(root = packageRoot): Release {
