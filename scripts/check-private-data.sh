@@ -35,7 +35,22 @@ esac
 TERMS_FILE="$ROOT_DIR/.private-terms"
 TERMS_PATTERN=""
 if [[ -f "$TERMS_FILE" ]]; then
-  TERMS_PATTERN="$(grep -vE '^[[:space:]]*(#|$)' "$TERMS_FILE" | paste -sd '|' - || true)"
+  terms_status=0
+  terms="$(grep -vE '^[[:space:]]*(#|$)' -- "$TERMS_FILE")" || terms_status=$?
+  if [[ "$terms_status" -gt 1 ]]; then
+    echo 'private-data check: cannot read .private-terms' >&2
+    exit 2
+  fi
+  TERMS_PATTERN="$(paste -sd '|' - <<< "$terms")"
+fi
+
+# A broken pattern must stop the check: grep would report it as "no match" everywhere.
+if [[ -n "$TERMS_PATTERN" ]]; then
+  if grep -qiE -- "$TERMS_PATTERN" </dev/null; then :
+  elif [[ "$?" -gt 1 ]]; then
+    echo 'private-data check: invalid regular expression in .private-terms' >&2
+    exit 2
+  fi
 fi
 
 FORBIDDEN_PATHS='(^|/)\.env($|\.)|(^|/)\.npmrc$|\.(pem|key|crt|p12|pfx|db|sqlite|sqlite3|bundle)$|(^|/)certs/|(^|/)backups/|(^|/)\.hive-dev/|(^|/)[^/]+\.local\.md$|(^|/)\.private-terms$|(^|/)\.vscode/mcp\.json$'
@@ -54,9 +69,35 @@ shown() {
   fi
 }
 
+# Scratch space for staged blobs, filtered messages and search results; removed on exit.
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+
+# Prints the numbers of the lines in file $1 that contain a private term. grep reads the whole
+# file into a file of its own (no -q early exit and no pipe, where under pipefail an early exit
+# can surface as SIGPIPE, exit 141, and pass as "no match"), and any grep error stops the check.
+term_lines() {
+  local status=0
+  grep -naiE -- "$TERMS_PATTERN" "$1" > "$scratch/hits" || status=$?
+  case "$status" in
+    0) cut -d: -f1 -- "$scratch/hits" ;;
+    1) ;;
+    *) echo 'private-data check: could not search for private terms' >&2; exit 2 ;;
+  esac
+}
+
 if [[ "$MODE" == "message" ]]; then
-  if [[ -n "$TERMS_PATTERN" ]] && grep -vE '^#' "$MESSAGE_FILE" | grep -qiE -- "$TERMS_PATTERN"; then
-    fail "commit message contains a term listed in .private-terms"
+  if [[ -n "$TERMS_PATTERN" ]]; then
+    filter_status=0
+    grep -vE '^#' -- "$MESSAGE_FILE" > "$scratch/message" || filter_status=$?
+    if [[ "$filter_status" -gt 1 ]]; then
+      echo 'private-data check: could not read the commit message file' >&2
+      exit 2
+    fi
+    message_lines="$(term_lines "$scratch/message")"
+    if [[ -n "$message_lines" ]]; then
+      fail "commit message contains a term listed in .private-terms"
+    fi
   fi
   [[ "$failures" -eq 0 ]] || exit 1
   exit 0
@@ -76,20 +117,24 @@ for file in "${files[@]}"; do
 done
 
 if [[ -n "$TERMS_PATTERN" && "${#files[@]}" -gt 0 ]]; then
+  index_file="$scratch/index"
   for file in "${files[@]}"; do
     [[ -n "$file" ]] || continue
     if [[ "$MODE" == "staged" ]]; then
-      content="$(git show ":$file" 2>/dev/null || true)"
+      # A blob that cannot be read stops the check (set -e) rather than passing as empty.
+      git show ":$file" > "$index_file"
+      content_file="$index_file"
     else
       [[ -f "$file" ]] || continue
-      content="$(cat -- "$file")"
+      content_file="$file"
     fi
     display="$(shown "$file")"
-    if matches="$(grep -naiE -- "$TERMS_PATTERN" <<< "$content" | cut -d: -f1)"; then
-      while IFS= read -r line; do
-        fail "$display:$line: private term"
-      done <<< "$matches"
-    fi
+    # A plain assignment, so a search error (exit 2 from term_lines) stops the check.
+    content_lines="$(term_lines "$content_file")"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      fail "$display:$line: private term"
+    done <<< "$content_lines"
     if [[ "$display" != "$file" ]]; then
       fail "$display: private term in file name"
     fi

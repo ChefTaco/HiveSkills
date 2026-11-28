@@ -102,6 +102,9 @@ if [[ -f "$ROOT_DIR/scripts/scan-secrets.sh" ]]; then
   cd "$ROOT_DIR"
 fi
 
+# --- fail-closed behaviour (large inputs, removal commits) -----------------------
+bash "$ROOT_DIR/scripts/privacy-fail-closed.test.sh" || problem "scripts/privacy-fail-closed.test.sh"
+
 if [[ "$failures" -gt 0 ]]; then
   echo "privacy output test failed with $failures problem(s)." >&2
   exit 1
