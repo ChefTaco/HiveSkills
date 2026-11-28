@@ -15,7 +15,7 @@ const { hash, releaseSchema } = await import('./release/runtime.js');
 const { SKILLS_MIGRATIONS, skillsMigration, skillsRelease } = await import('./upgrade.js');
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string; hiveRelease?: unknown };
 
-test('the migration release is this package, and its skills schema checksum is unchanged', () => {
+test('the migration release is this package, and its skills schema checksum is unchanged', async () => {
   assert.equal(pkg.hiveRelease, undefined, 'package.json carries no frozen bundle manifest');
   const release = releaseSchema.parse(skillsRelease());
   assert.equal(release.version, pkg.version);
@@ -28,7 +28,14 @@ test('the migration release is this package, and its skills schema checksum is u
     ['managed-format-3', 'f0e4ce285573b35b41865eb979dc2959b345342b3450604d7e43d68d969c792f'],
   ]);
   assert.ok(SKILLS_MIGRATIONS.every((m) => m.component === 'skills' && m.impact === 'fast'));
-  assert.equal(release.dataCompatibility.skills, '^1.1.0');
+  // Older binaries would write releases without transparency log entries: they must refuse the data.
+  assert.equal(release.dataCompatibility.skills, '^1.12.0');
+  const { satisfies } = await import('./release/runtime.js');
+  assert.equal(satisfies('1.11.1', release.dataCompatibility.skills), false);
+  // A build that records readableBy ^1.12.0 must itself be 1.12.0 or later once released. 1.11.1 is
+  // released already (the release workflow refuses to overwrite its image), so any release of this
+  // code changes the version, and this check, which the release workflow runs, forces it to qualify.
+  assert.ok(pkg.version === '1.11.1' || satisfies(pkg.version, release.dataCompatibility.skills), `release ${pkg.version} would record data it cannot read itself (${release.dataCompatibility.skills})`);
 });
 
 test('migrate keeps a state file written under the legacy 1.2.2 manifest readable', async () => {

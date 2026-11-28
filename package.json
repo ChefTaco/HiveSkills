@@ -71,6 +71,8 @@
     "!dist/*.test.js",
     "scripts/archive-utils.mjs",
     "scripts/hermes-sync.mjs",
+    "scripts/transparency-log.mjs",
+    "scripts/verify-transparency-log.mjs",
     "scripts/deploy-hermes-agent.sh",
     "registry-sources",
     "README.md",

@@ -64,9 +64,21 @@ export const SKILLS_MIGRATIONS: Release['migrations'] = [
     readableBy: '^1.1.0',
     note: 'Add publisher signatures of immutable releases in a side table; release rows and older binaries are unaffected.',
   },
+  {
+    component: 'skills',
+    id: 'managed-format-6',
+    checksum: '738ba1ad72925af33c02404ff7ccd3a575cfa4b8e7e77fdbf0fed8c87971438b',
+    impact: 'fast',
+    readableBy: '^1.12.0',
+    note: 'Add signed revocation lists and the append-only transparency log in new tables. Older binaries would store releases without logging them, so they refuse this data; roll back by restoring the pre-upgrade backup.',
+  },
 ];
-/** The oldest HiveSkills whose code reads data written by this one. */
-export const SKILLS_DATA_COMPATIBILITY = '^1.1.0';
+/**
+ * The oldest HiveSkills whose code reads data written by this one. 1.12.0 is the first release that
+ * keeps the transparency log and enforces revocations: an older binary would store and promote
+ * releases without either, so it must refuse this data (restore the pre-upgrade backup to roll back).
+ */
+export const SKILLS_DATA_COMPATIBILITY = '^1.12.0';
 
 /** This package's own release record for the migration engine, versioned with the package. */
 export function skillsRelease(root = packageRoot): Release {
@@ -124,6 +136,9 @@ export async function skillsMigration(args: readonly string[], automatic = false
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='target_agent_links'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_advisories'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_signatures'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revocation_lists'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transparency_log'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_signature_keys'").get() ||
           !columns.has('min_hermes_version') ||
           !columns.has('max_hermes_version') ||
           !db.prepare("SELECT id FROM registry_migrations WHERE id='release-channels'").get(),

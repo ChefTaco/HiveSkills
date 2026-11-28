@@ -37,6 +37,8 @@ const ACTIONS: Record<string, Mapping> = {
   'release.sign': { action: 'release.sign', target: 'release', withId: true },
   'release.advisory': { action: 'release.advisory_set', target: 'release', withId: true },
   'release.advisory.clear': { action: 'release.advisory_clear', target: 'release', withId: true },
+  // The subject is the published list's sequence number.
+  'revocations.publish': { action: 'revocations.publish', target: 'revocation_list', withId: true },
   'target.update': { action: 'target.update', target: 'target', withId: true },
   'target.enroll': { action: 'target.enroll', target: 'target', withId: true },
   'deployment.prepared': { action: 'deployment.prepare', target: 'target', withId: true },
