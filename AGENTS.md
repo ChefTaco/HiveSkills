@@ -33,7 +33,7 @@ consumers use the public contracts in `docs/browser-contracts.ts`, never backend
 | `src/migrations/`, `src/schema.ts`, `src/db.ts` | SQLite schema and migrations (immutable history) |
 | `src/release/` | Generated at build from `tooling/release` (gitignored) |
 | `tooling/release/` | Vendored managed-upgrade and recovery engine, its own npm workspace and tests |
-| `scripts/` | Hermes sync bridge, deploy helpers, OpenAPI and browser-contract exporters, privacy and secret scans |
+| `scripts/` | Hermes sync bridge, release and revocation signing (`sign-release.mjs`), the transparency log and its verifier, deploy helpers, OpenAPI and browser-contract exporters, privacy and secret scans |
 | `registry-sources/hivemem/` | Bundled HiveMem skill used by `seed` |
 | `docs/` | `openapi.json`, `browser-contracts.ts` (both checked by CI) and `OATHWEAVE.md` |
 

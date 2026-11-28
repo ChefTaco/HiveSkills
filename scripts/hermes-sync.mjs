@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { boundedResponse, extractArchive, MAX_ARCHIVE_BYTES, parsePublisherKeys, verifyReleaseSignature } from './archive-utils.mjs';
+import { boundedResponse, extractArchive, keyRevocation, MAX_ARCHIVE_BYTES, MAX_REVOCATION_PAYLOAD_BYTES, parsePublisherKeys, releaseRevocation, verifyReleaseSignature, verifyRevocationList } from './archive-utils.mjs';
 
 const safeSlug = (value) => typeof value === 'string' && /^[a-z0-9][a-z0-9-]{1,62}$/.test(value);
 const versionParts = (value) => { const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/.exec(String(value)); return match ? match.slice(1).map(Number) : null; };
@@ -45,8 +45,11 @@ export async function restartGateway({ run = spawnSync, sleep = (ms) => new Prom
   if (before !== null && afterwards !== null && afterwards > before) throw new Error('Hermes gateway restarted again after the restart');
 }
 
-export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), unsignedInstalled = 'report', hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => restartGateway() }) {
+export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.hermes'), fetchImpl = fetch, target, token, frozenManifest, publisherKeys = new Map(), unsignedInstalled = 'report', revocationKeys = new Map(), revokedInstalled = 'quarantine', minRevocationSequence = 0, now = () => Date.now(), hermesVersion = detectHermesVersion(), checkpoint = () => {}, restart = () => restartGateway() }) {
   if (unsignedInstalled !== 'report' && unsignedInstalled !== 'quarantine') throw new Error('HIVE_SKILLS_UNSIGNED_INSTALLED must be report or quarantine');
+  if (revokedInstalled !== 'report' && revokedInstalled !== 'quarantine') throw new Error('HIVE_SKILLS_REVOKED_INSTALLED must be quarantine or report');
+  if (!Number.isSafeInteger(minRevocationSequence) || minRevocationSequence < 0) throw new Error('HIVE_SKILLS_MIN_REVOCATION_SEQUENCE must be a non-negative integer');
+  if (minRevocationSequence > 0 && !revocationKeys.size) throw new Error('HIVE_SKILLS_MIN_REVOCATION_SEQUENCE needs HIVE_SKILLS_REVOCATION_KEYS');
   const origin = new URL(registry);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) throw new Error('Registry requires a plain HTTPS URL');
   // A frozen approval never bypasses native target revocation or a changed
@@ -98,20 +101,85 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     if (target) { if (!token) throw new Error('Target token required'); manifestUrl.searchParams.set('target', target); }
     if (hermesVersion) { if (!versionParts(hermesVersion)) throw new Error('Invalid local Hermes version'); manifestUrl.searchParams.set('hermes_version', hermesVersion); }
     const manifest = frozenManifest ?? JSON.parse((await boundedResponse(await fetchImpl(manifestUrl, { ...(target ? { headers: { authorization: `Bearer ${token}` } } : {}), redirect: 'error', signal: AbortSignal.timeout(20_000) }), 1024 * 1024)).toString('utf8'));
-    if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.skills) || manifest.skills.length > 1000) throw new Error('Unsupported manifest');
-    const channel = manifest.channel ?? 'stable';
-    if (channel !== 'stable' && channel !== 'canary') throw new Error('Unsupported manifest channel');
+    // A manifest the bridge refuses still fails the sync, but only after revoked installed skills
+    // were dealt with: a registry cannot keep them running by serving an unusable manifest.
     const desired = new Set();
-    for (const skill of manifest.skills) {
-      if (!safeSlug(skill.slug) || desired.has(skill.slug) || !/^[a-f0-9]{64}$/.test(skill.sha256) || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(skill.version)) throw new Error('Unsafe manifest entry');
-      if (!compatibleVersion(hermesVersion, skill.compatibility)) throw new Error(`Skill ${skill.slug} is incompatible with this Hermes runtime`);
-      const archiveUrl = new URL(skill.archiveUrl);
-      const expected = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}/archive`);
-      if (channel !== 'stable') expected.searchParams.set('channel', channel);
-      if (archiveUrl.href !== expected.href) throw new Error('Unexpected archive origin or path');
-      desired.add(skill.slug);
-    }
+    let manifestError = null;
+    try {
+      if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.skills) || manifest.skills.length > 1000) throw new Error('Unsupported manifest');
+      const channel = manifest.channel ?? 'stable';
+      if (channel !== 'stable' && channel !== 'canary') throw new Error('Unsupported manifest channel');
+      for (const skill of manifest.skills) {
+        if (!safeSlug(skill.slug) || desired.has(skill.slug) || !/^[a-f0-9]{64}$/.test(skill.sha256) || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(skill.version)) throw new Error('Unsafe manifest entry');
+        if (!compatibleVersion(hermesVersion, skill.compatibility)) throw new Error(`Skill ${skill.slug} is incompatible with this Hermes runtime`);
+        const archiveUrl = new URL(skill.archiveUrl);
+        const expected = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}/archive`);
+        if (channel !== 'stable') expected.searchParams.set('channel', channel);
+        if (archiveUrl.href !== expected.href) throw new Error('Unexpected archive origin or path');
+        desired.add(skill.slug);
+      }
+    } catch (error) { manifestError = error; }
+    const offered = manifestError ? [] : manifest.skills;
     const needsInstall = (skill) => !(prior.skills?.[skill.slug]?.sha256 === skill.sha256 && existsSync(resolve(root, skill.slug, 'SKILL.md')));
+    const postReceipt = async (body) => {
+      atomicJson(resolve(control, 'receipt.json'), { registry: origin.href, completedAt: new Date().toISOString(), ...body });
+      if (!target) return;
+      const receipt = await fetchImpl(new URL(origin.href.replace(/\/$/, '') + '/v1/agent/receipts/' + encodeURIComponent(target)), { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20_000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (!receipt.ok) throw new Error('Fleet receipt upload failed');
+    };
+    // With pinned revocation keys, the registry's signed revocation list is read and verified on every
+    // run (the sync timer makes that periodic), before anything is activated. A missing, unverifiable,
+    // older or expired list fails the sync closed. The highest sequence seen is kept in the state file,
+    // so the registry cannot roll the list back. A revoked release, or one signed only by a revoked
+    // publisher key, is refused; installed ones are quarantined (HIVE_SKILLS_REVOKED_INSTALLED=report
+    // only reports them) and the registry is told in a `revoked` receipt.
+    let revocations = null;
+    if (revocationKeys.size) {
+      if (!target || !token) throw new Error('Pinned revocation keys need an enrolled target to read the revocation list');
+      const url = new URL(origin.href.replace(/\/$/, '') + '/v1/revocations');
+      url.searchParams.set('target', target);
+      const response = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) });
+      if (response.status === 404) throw new Error('The registry serves no revocation list; publish one before pinning revocation keys');
+      const served = JSON.parse((await boundedResponse(response, 2 * MAX_REVOCATION_PAYLOAD_BYTES + 64 * 1024)).toString('utf8'));
+      revocations = verifyRevocationList(revocationKeys, served);
+      const payloadSha256 = createHash('sha256').update(served.payload).digest('hex');
+      const seen = prior.revocations;
+      if (seen && revocations.sequence < seen.sequence) throw new Error(`The registry served revocation list ${revocations.sequence}, older than list ${seen.sequence} seen before`);
+      // A pinned minimum holds even when the state file (and with it the highest sequence seen) is lost.
+      if (revocations.sequence < minRevocationSequence) throw new Error(`The registry served revocation list ${revocations.sequence}, older than the pinned minimum ${minRevocationSequence}`);
+      if (seen && revocations.sequence === seen.sequence && payloadSha256 !== seen.payloadSha256) throw new Error(`The registry served a different revocation list ${revocations.sequence} than the one seen before`);
+      if (revocations.expiresAt !== null && Date.parse(revocations.expiresAt) <= now()) throw new Error(`Revocation list ${revocations.sequence} expired at ${revocations.expiresAt}; the revocation authority must publish a fresh one`);
+      if (!seen || seen.sequence !== revocations.sequence) {
+        prior.revocations = { sequence: revocations.sequence, payloadSha256, issuedAt: revocations.issuedAt };
+        atomicJson(statePath, { ...prior, registry: origin.href });
+      }
+    }
+    // Findings about revoked releases and keys: {slug, version, reason, keyId?, install, why, source}.
+    // `source` is `manifest` for a release the manifest offers and `installed` for what a skill runs
+    // now. A release is revoked by slug and version or by digest, so the same bytes relabelled as
+    // another version stay revoked. Every installed skill is checked on its own, whatever the manifest
+    // offers for it now: the release it runs (as recorded at installation) and the key that vouched
+    // for those bytes when they were verified. Those findings are acted on (quarantined or reported)
+    // before anything the manifest offers can fail the sync.
+    const revoked = [];
+    const rememberedKeyOf = (remembered) => typeof remembered?.key === 'string' ? remembered.key.slice(remembered.key.lastIndexOf(':') + 1) : undefined;
+    if (revocations) {
+      for (const skill of offered) {
+        const entry = releaseRevocation(revocations, skill);
+        if (entry) revoked.push({ slug: skill.slug, version: skill.version, reason: 'release', install: needsInstall(skill), why: entry.reason, source: 'manifest' });
+      }
+      for (const [slug, installed] of Object.entries(prior.skills ?? {})) {
+        if (!safeSlug(slug) || !existsSync(resolve(root, slug)) || revoked.some((entry) => entry.slug === slug && !entry.install)) continue;
+        const entry = releaseRevocation(revocations, { slug, version: installed?.version, sha256: installed?.sha256 });
+        if (entry) { revoked.push({ slug, version: String(installed.version), reason: 'release', install: false, why: entry.reason, source: 'installed' }); continue; }
+        const remembered = prior.verifiedSignatures?.[slug];
+        const keyEntry = remembered?.sha256 === installed?.sha256 ? keyRevocation(revocations, rememberedKeyOf(remembered)) : undefined;
+        if (keyEntry) revoked.push({ slug, version: String(installed.version), reason: 'key', keyId: remembered.keyId, install: false, why: keyEntry.reason, source: 'installed' });
+      }
+    }
+    // Only a revoked manifest release skips the signature check; a revoked installed skill does not
+    // excuse a new version of it from being signed.
+    const manifestRevoked = (slug) => revoked.some((entry) => entry.slug === slug && entry.source === 'manifest');
     // With pinned publisher keys, every release about to be installed must carry a valid signature
     // from one of them. All are checked before anything is activated, so a registry or an
     // administrator session cannot push code the publisher did not sign. Skills installed before the
@@ -119,40 +187,77 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     // unsigned one is reported, or with HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine moved out of the
     // gateway's skills directory, so unsigned code stops running.
     const verifiedSignatures = {};
+    const signatureFindings = { refused: [], unsigned: [] };
     if (publisherKeys.size) {
       if (!target || !token) throw new Error('Pinned publisher keys need an enrolled target to read release signatures');
       const keyStamp = (keyId) => { const key = publisherKeys.get(keyId); return key ? `${keyId}:${key.export({ format: 'jwk' }).x}` : undefined; };
+      const revokedKey = (keyId) => keyRevocation(revocations, publisherKeys.get(keyId));
       const refused = []; const unsigned = [];
-      for (const skill of manifest.skills) {
+      for (const skill of offered) {
+        if (manifestRevoked(skill.slug)) continue;
         const install = needsInstall(skill);
         const remembered = prior.verifiedSignatures?.[skill.slug];
-        if (!install && remembered && remembered.sha256 === skill.sha256 && remembered.key === keyStamp(remembered.keyId)) { verifiedSignatures[skill.slug] = remembered; continue; }
+        // An installed skill whose verifying key is revoked stays revoked unless the registry serves a
+        // fresh, valid signature of the same bytes by an unrevoked key.
+        const installedFinding = revoked.findIndex((entry) => entry.slug === skill.slug && entry.source === 'installed');
+        if (!install && installedFinding >= 0 && revoked[installedFinding].reason === 'release') continue;
+        if (!install && installedFinding < 0 && remembered && remembered.sha256 === skill.sha256 && remembered.key === keyStamp(remembered.keyId)) { verifiedSignatures[skill.slug] = remembered; continue; }
         const url = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}`);
         url.searchParams.set('target', target);
-        const metadata = JSON.parse((await boundedResponse(await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 64 * 1024)).toString('utf8'));
-        if (metadata.slug !== skill.slug || metadata.version !== skill.version || metadata.sha256 !== skill.sha256) throw new Error(`Release metadata for ${skill.slug} differs from the manifest`);
-        if (verifyReleaseSignature(publisherKeys, skill, metadata.signature)) verifiedSignatures[skill.slug] = { sha256: skill.sha256, keyId: metadata.signature.keyId, key: keyStamp(metadata.signature.keyId) };
-        else (install ? refused : unsigned).push(`${skill.slug} ${skill.version}`);
+        let metadata;
+        try { metadata = JSON.parse((await boundedResponse(await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 64 * 1024)).toString('utf8')); }
+        catch { metadata = null; }
+        // Unreadable or mismatched metadata is a refusal for this release, not an early failure that
+        // would keep revoked installed skills running.
+        if (!metadata || metadata.slug !== skill.slug || metadata.version !== skill.version || metadata.sha256 !== skill.sha256) { if (install || installedFinding < 0) (install ? refused : unsigned).push(`${skill.slug} ${skill.version} (release metadata unavailable or differs from the manifest)`); continue; }
+        const signedBy = verifyReleaseSignature(publisherKeys, skill, metadata.signature) ? metadata.signature.keyId : null;
+        const keyEntry = signedBy && revokedKey(signedBy);
+        if (keyEntry) {
+          if (installedFinding < 0 || install) revoked.push({ slug: skill.slug, version: skill.version, reason: 'key', keyId: signedBy, install, why: keyEntry.reason, source: 'manifest' });
+        } else if (signedBy) {
+          verifiedSignatures[skill.slug] = { sha256: skill.sha256, keyId: signedBy, key: keyStamp(signedBy) };
+          if (!install && installedFinding >= 0) revoked.splice(installedFinding, 1); // Re-signed by a valid key.
+        } else if (install || installedFinding < 0) (install ? refused : unsigned).push(`${skill.slug} ${skill.version}`);
       }
-      if (unsigned.length && unsignedInstalled === 'quarantine') {
-        for (const entry of unsigned) {
-          const slug = entry.split(' ')[0];
-          const quarantine = resolve(control, slug + '.quarantined');
-          rmSync(quarantine, { recursive: true, force: true });
-          if (existsSync(resolve(root, slug))) renameSync(resolve(root, slug), quarantine);
-          delete prior.skills[slug];
-        }
-        atomicJson(statePath, { ...prior, restartPending: true });
-        await restart();
-        atomicJson(statePath, { ...prior, restartPending: false });
-        throw new Error(`Quarantined installed skills without a valid signature from a pinned publisher key: ${unsigned.join(', ')}`);
-      }
-      if (unsigned.length) console.warn(`Installed skills without a valid signature from a pinned publisher key stay active (set HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine to remove them): ${unsigned.join(', ')}`);
-      if (refused.length) throw new Error(`Skill ${refused.join(', ')} has no valid signature from a pinned publisher key`);
+      signatureFindings.refused = refused; signatureFindings.unsigned = unsigned;
     }
+    const describe = (entry) => `${entry.slug} ${entry.version} (${entry.reason === 'key' ? `signing key ${entry.keyId} revoked` : 'release revoked'}: ${entry.why})`;
+    const revokedInstalledSkills = revoked.filter((entry) => !entry.install);
+    const quarantineUnsigned = unsignedInstalled === 'quarantine' ? signatureFindings.unsigned : [];
+    const quarantineRevoked = revokedInstalled === 'quarantine' ? revokedInstalledSkills : [];
+    const receiptRevocations = (action) => revoked.map((entry) => ({ slug: entry.slug, version: entry.version, reason: entry.reason, ...(entry.keyId ? { keyId: entry.keyId } : {}), action: entry.install ? 'refused' : action }));
+    const reportRevoked = async (action) => {
+      try { await postReceipt({ skills: prior.skills ?? {}, changed: [], status: 'revoked', revocations: receiptRevocations(action) }); }
+      catch (error) { console.error('revoked receipt upload failed', error); }
+    };
+    if (quarantineUnsigned.length || quarantineRevoked.length) {
+      for (const slug of [...quarantineUnsigned.map((entry) => entry.split(' ')[0]), ...quarantineRevoked.map((entry) => entry.slug)]) {
+        const quarantine = resolve(control, slug + '.quarantined');
+        rmSync(quarantine, { recursive: true, force: true });
+        if (existsSync(resolve(root, slug))) renameSync(resolve(root, slug), quarantine);
+        delete prior.skills[slug];
+      }
+      atomicJson(statePath, { ...prior, restartPending: true });
+      await restart();
+      atomicJson(statePath, { ...prior, restartPending: false });
+      if (revoked.length) await reportRevoked('quarantined');
+      const messages = [];
+      if (quarantineRevoked.length) messages.push(`Quarantined installed skills whose release or signing key is revoked: ${quarantineRevoked.map(describe).join(', ')}`);
+      if (quarantineUnsigned.length) messages.push(`Quarantined installed skills without a valid signature from a pinned publisher key: ${quarantineUnsigned.join(', ')}`);
+      throw new Error(messages.join('; '));
+    }
+    if (signatureFindings.unsigned.length) console.warn(`Installed skills without a valid signature from a pinned publisher key stay active (set HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine to remove them): ${signatureFindings.unsigned.join(', ')}`);
+    if (revokedInstalledSkills.length) console.warn(`Installed skills whose release or signing key is revoked stay active because HIVE_SKILLS_REVOKED_INSTALLED=report: ${revokedInstalledSkills.map(describe).join(', ')}`);
+    if (manifestError) throw manifestError;
+    const revokedInstall = revoked.filter((entry) => entry.install);
+    if (revokedInstall.length) {
+      await reportRevoked('reported');
+      throw new Error(`Refused revoked releases: ${revokedInstall.map(describe).join(', ')}`);
+    }
+    if (signatureFindings.refused.length) throw new Error(`Skill ${signatureFindings.refused.join(', ')} has no valid signature from a pinned publisher key`);
     // `pendingChanges` lists the skills installed since the gateway last restarted cleanly, carried
     // across runs while a restart is pending, so a failed restart is attributed to them only.
-    const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true, pendingChanges: prior.restartPending === true && Array.isArray(prior.pendingChanges) ? prior.pendingChanges.filter(safeSlug) : [], ...(publisherKeys.size ? { verifiedSignatures } : {}) };
+    const next = { registry: origin.href, skills: { ...prior.skills }, restartPending: prior.restartPending === true, pendingChanges: prior.restartPending === true && Array.isArray(prior.pendingChanges) ? prior.pendingChanges.filter(safeSlug) : [], ...(publisherKeys.size ? { verifiedSignatures } : {}), ...(prior.revocations ? { revocations: prior.revocations } : {}) };
     let changed = false;
     for (const skill of manifest.skills) {
       const destination = resolve(root, skill.slug);
@@ -191,12 +296,8 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     atomicJson(statePath, next);
     // `changed` names the skills this activation installed; the registry's automatic canary rollback
     // acts only on those when the restart fails.
-    const report = async (status, changes) => {
-      atomicJson(resolve(control, 'receipt.json'), { registry: origin.href, completedAt: new Date().toISOString(), skills: next.skills, changed: changes, status });
-      if (!target) return;
-      const receipt = await fetchImpl(new URL(origin.href.replace(/\/$/, '') + '/v1/agent/receipts/' + encodeURIComponent(target)), { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20_000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ skills: next.skills, changed: changes, status }) });
-      if (!receipt.ok) throw new Error('Fleet receipt upload failed');
-    };
+    // Revoked installed skills kept active (HIVE_SKILLS_REVOKED_INSTALLED=report) are named in the receipt.
+    const report = (status, changes) => postReceipt({ skills: next.skills, changed: changes, status, ...(revoked.length ? { revocations: receiptRevocations('reported') } : {}) });
     const changes = [...next.pendingChanges];
     if (next.restartPending) {
       try { await restart(); }
@@ -214,5 +315,5 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined, publisherKeys: parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS), unsignedInstalled: process.env.HIVE_SKILLS_UNSIGNED_INSTALLED || 'report' });
+  await syncSkills({ registry: process.env.HIVE_SKILLS_URL, hermesHome: process.env.HERMES_HOME, target: process.env.HIVE_SKILLS_TARGET, token: process.env.HIVE_SKILLS_TARGET_TOKEN, frozenManifest: process.env.HIVE_SKILLS_FROZEN_MANIFEST ? JSON.parse(process.env.HIVE_SKILLS_FROZEN_MANIFEST) : undefined, publisherKeys: parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS), unsignedInstalled: process.env.HIVE_SKILLS_UNSIGNED_INSTALLED || 'report', revocationKeys: parsePublisherKeys(process.env.HIVE_SKILLS_REVOCATION_KEYS), revokedInstalled: process.env.HIVE_SKILLS_REVOKED_INSTALLED || 'quarantine', minRevocationSequence: process.env.HIVE_SKILLS_MIN_REVOCATION_SEQUENCE ? Number(process.env.HIVE_SKILLS_MIN_REVOCATION_SEQUENCE) : 0 });
 }

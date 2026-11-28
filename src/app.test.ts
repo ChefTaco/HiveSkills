@@ -157,7 +157,7 @@ test('health endpoints report the service capabilities', async () => {
   assert.ok(SERVICE_CAPABILITIES.includes('skills.pinned-release.v1'));
   for (const path of ['/health/live', '/health/ready', '/healthz']) {
     const body = await (await app.request(`https://registry.test${path}`)).json() as { capabilities?: unknown };
-    assert.deepEqual(body.capabilities, ['skills.pinned-release.v1'], path);
+    assert.deepEqual(body.capabilities, ['skills.pinned-release.v1', 'skills.revocations.v1', 'skills.transparency-log.v1'], path);
   }
   // Additive: the existing fields are still there.
   const live = await (await app.request('https://registry.test/health/live')).json() as Record<string, unknown>;

@@ -4,6 +4,7 @@ import { initializeDeploymentJournal } from './migrations/managed-format-2.js';
 import { initializeTargetAgentLinks } from './migrations/managed-format-3.js';
 import { initializeReleaseAdvisories } from './migrations/managed-format-4.js';
 import { initializeReleaseSignatures } from './migrations/managed-format-5.js';
+import { initializeRevocationsAndTransparencyLog } from './migrations/managed-format-6.js';
 // The released, checksum-pinned migrations use only these SQL operations.
 // Adapt their structural connection boundary without changing migration bytes.
 interface SchemaConnection {
@@ -19,6 +20,7 @@ const deploymentJournal = initializeDeploymentJournal as (db: SchemaConnection) 
 const targetAgentLinks = initializeTargetAgentLinks as (db: SchemaConnection) => void;
 const releaseAdvisories = initializeReleaseAdvisories as (db: SchemaConnection) => void;
 const releaseSignatures = initializeReleaseSignatures as (db: SchemaConnection) => void;
+const revocationsAndLog = initializeRevocationsAndTransparencyLog as (db: SchemaConnection) => void;
 /** Append additive modules; the published baseline remains immutable. */
 export function initializeSchema(db: DatabaseSync): void {
   baseline(db);
@@ -26,4 +28,5 @@ export function initializeSchema(db: DatabaseSync): void {
   targetAgentLinks(db);
   releaseAdvisories(db);
   releaseSignatures(db);
+  revocationsAndLog(db);
 }

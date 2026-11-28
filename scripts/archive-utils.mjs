@@ -108,3 +108,109 @@ export function verifyReleaseSignature(keys, release, signature) {
   if (bytes.length !== 64) return false;
   try { return verify(null, releaseSigningMessage(release.slug, release.version, release.sha256), key, bytes); } catch { return false; }
 }
+
+// Signed revocation lists. A revocation authority, whose Ed25519 keys are pinned separately from the
+// publisher keys (HIVE_SKILLS_REVOCATION_KEYS), signs the exact payload string; the registry serves
+// it unchanged and the bridge verifies it before activation. The payload is JSON:
+//   {"schema":"hiveskills-revocations-v1","sequence":N,"issuedAt":ISO,"expiresAt":ISO|null,
+//    "keys":[{"keyId","publicKey","reason","revokedAt"}],
+//    "releases":[{"slug","version","sha256","reason","revokedAt"}]}
+// `sequence` only ever grows, so a registry cannot serve an older list once a newer one was seen.
+export const REVOCATIONS_SCHEMA = 'hiveskills-revocations-v1';
+export const MAX_REVOKED_KEYS = 256;
+export const MAX_REVOKED_RELEASES = 2000;
+/** The largest payload a list may have; the registry and the bridge refuse anything bigger. */
+export const MAX_REVOCATION_PAYLOAD_BYTES = 384 * 1024;
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const SLUG = /^[a-z0-9][a-z0-9-]{1,62}$/;
+const RELEASE_VERSION = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const DIGEST = /^[a-f0-9]{64}$/;
+
+export function revocationSigningMessage(payload) {
+  return Buffer.from(`hiveskills-revocation-list-v1\n${payload}`, 'utf8');
+}
+
+/** The base64url raw 32-byte Ed25519 public key of a key object. */
+export const rawPublicKey = (key) => key.export({ format: 'jwk' }).x;
+
+const exactKeys = (value, keys, what) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== [...keys].sort().join(',')) throw new Error(`${what} must have exactly ${keys.join(', ')}`);
+};
+const isoTime = (value, what) => {
+  if (typeof value !== 'string' || !ISO_TIME.test(value) || !Number.isFinite(Date.parse(value))) throw new Error(`${what} must be an ISO 8601 UTC time`);
+  return value;
+};
+const reasonText = (value, what) => {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > 500 || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${what} needs a reason of at most 500 characters`);
+  return value;
+};
+
+/** Validate a revocation payload string and return the parsed list. Anything unexpected throws. */
+export function parseRevocationPayload(payload) {
+  if (typeof payload !== 'string' || Buffer.byteLength(payload, 'utf8') > MAX_REVOCATION_PAYLOAD_BYTES) throw new Error('Revocation payload must be a string of at most 384 KiB');
+  let list;
+  try { list = JSON.parse(payload); } catch { throw new Error('Revocation payload must be JSON'); }
+  exactKeys(list, ['schema', 'sequence', 'issuedAt', 'expiresAt', 'keys', 'releases'], 'A revocation list');
+  if (list.schema !== REVOCATIONS_SCHEMA) throw new Error(`Revocation list schema must be ${REVOCATIONS_SCHEMA}`);
+  if (!Number.isSafeInteger(list.sequence) || list.sequence < 1) throw new Error('Revocation list sequence must be a positive integer');
+  isoTime(list.issuedAt, 'issuedAt');
+  if (list.expiresAt !== null) { isoTime(list.expiresAt, 'expiresAt'); if (Date.parse(list.expiresAt) <= Date.parse(list.issuedAt)) throw new Error('expiresAt must be after issuedAt'); }
+  if (!Array.isArray(list.keys) || list.keys.length > MAX_REVOKED_KEYS) throw new Error(`Revocation list keys must be an array of at most ${MAX_REVOKED_KEYS}`);
+  if (!Array.isArray(list.releases) || list.releases.length > MAX_REVOKED_RELEASES) throw new Error(`Revocation list releases must be an array of at most ${MAX_REVOKED_RELEASES}`);
+  const seenKeys = new Set();
+  for (const entry of list.keys) {
+    exactKeys(entry, ['keyId', 'publicKey', 'reason', 'revokedAt'], 'A revoked key');
+    if (typeof entry.keyId !== 'string' || !KEY_ID.test(entry.keyId)) throw new Error('A revoked key id must match [A-Za-z0-9._-]{1,64}');
+    if (typeof entry.publicKey !== 'string' || !BASE64URL.test(entry.publicKey) || Buffer.from(entry.publicKey, 'base64url').length !== 32) throw new Error(`Revoked key ${entry.keyId} must be a base64url raw 32-byte Ed25519 public key`);
+    const identity = `${entry.keyId}:${entry.publicKey}`;
+    if (seenKeys.has(identity)) throw new Error(`Key ${entry.keyId} is revoked twice`);
+    seenKeys.add(identity);
+    reasonText(entry.reason, `Revoked key ${entry.keyId}`); isoTime(entry.revokedAt, 'revokedAt');
+  }
+  const seenReleases = new Set();
+  for (const entry of list.releases) {
+    exactKeys(entry, ['slug', 'version', 'sha256', 'reason', 'revokedAt'], 'A revoked release');
+    if (typeof entry.slug !== 'string' || !SLUG.test(entry.slug) || typeof entry.version !== 'string' || !RELEASE_VERSION.test(entry.version) || typeof entry.sha256 !== 'string' || !DIGEST.test(entry.sha256)) throw new Error('A revoked release needs a valid slug, version and sha256');
+    const identity = `${entry.slug}@${entry.version}`;
+    if (seenReleases.has(identity)) throw new Error(`Release ${identity} is revoked twice`);
+    seenReleases.add(identity);
+    reasonText(entry.reason, `Revoked release ${identity}`); isoTime(entry.revokedAt, 'revokedAt');
+  }
+  return list;
+}
+
+/**
+ * Verify a signed revocation list (`{payload, signature: {keyId, value}}`) against pinned revocation
+ * keys and return the parsed list. Throws when the signature, the key or the payload is not valid.
+ */
+export function verifyRevocationList(keys, envelope) {
+  if (!envelope || typeof envelope !== 'object' || typeof envelope.payload !== 'string') throw new Error('A signed revocation list needs a payload string');
+  const signature = envelope.signature;
+  if (!signature || typeof signature !== 'object' || typeof signature.keyId !== 'string' || typeof signature.value !== 'string') throw new Error('A signed revocation list needs a signature {keyId, value}');
+  const key = keys.get(signature.keyId);
+  if (!key) throw new Error(`Revocation list is signed by ${signature.keyId}, which is not a pinned revocation key`);
+  const bytes = BASE64URL.test(signature.value) ? Buffer.from(signature.value, 'base64url') : Buffer.alloc(0);
+  let valid = false;
+  try { valid = bytes.length === 64 && verify(null, revocationSigningMessage(envelope.payload), key, bytes); } catch { valid = false; }
+  if (!valid) throw new Error('Revocation list signature does not verify');
+  return parseRevocationPayload(envelope.payload);
+}
+
+/**
+ * The revoked-key entry for this public key (a key object or its base64url raw form), if the list
+ * revokes it. A key is revoked by its public key, whatever key id it is pinned or signed under.
+ */
+export function keyRevocation(list, key) {
+  if (!list || !key) return undefined;
+  const publicKey = typeof key === 'string' ? key : rawPublicKey(key);
+  return list.keys.find((entry) => entry.publicKey === publicKey);
+}
+
+/**
+ * The revoked-release entry for this release, if the list revokes it: by slug and version, or by
+ * digest under any name, so the same bytes cannot come back relabelled as another version or skill.
+ */
+export function releaseRevocation(list, release) {
+  if (!list || !release) return undefined;
+  return list.releases.find((entry) => (entry.slug === release.slug && entry.version === release.version) || (typeof release.sha256 === 'string' && entry.sha256 === release.sha256));
+}

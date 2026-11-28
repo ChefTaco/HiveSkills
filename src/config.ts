@@ -52,6 +52,7 @@ export const publicUrlFrom = (value: string | undefined, listenPort: number): st
 const publisherKeys = parsePublisherKeys(process.env.HIVE_SKILLS_PUBLISHER_KEYS);
 const requireSignedReleases = process.env.HIVE_SKILLS_REQUIRE_SIGNED_RELEASES === 'true';
 if (requireSignedReleases && publisherKeys.size === 0) throw new Error('HIVE_SKILLS_REQUIRE_SIGNED_RELEASES needs HIVE_SKILLS_PUBLISHER_KEYS');
+const revocationKeys = parsePublisherKeys(process.env.HIVE_SKILLS_REVOCATION_KEYS);
 
 const adminUsers = new Set((process.env.HIVE_SKILLS_ADMIN_USERS ?? '').split(',').map((value) => value.trim()).filter(Boolean));
 if (adminUsers.size === 0) console.warn('HIVE_SKILLS_ADMIN_USERS is empty; no account can administer the registry.');
@@ -78,6 +79,10 @@ export const config = {
   publisherKeys,
   /** Refuse release uploads without a valid publisher signature. */
   requireSignedReleases,
+  /** Revocation authority Ed25519 keys signed revocation lists are checked against, by key id. */
+  revocationKeys,
+  /** The registry's transparency log signing key (PKCS#8 PEM), created on first use when missing. */
+  transparencyKeyFile: resolve(process.env.HIVE_SKILLS_TRANSPARENCY_KEY_FILE?.trim() || resolve(dataDir, 'transparency-log-key.pem')),
   /** Opt-in canary promotion and rollback (src/rollout.ts). */
   rollout: parseRolloutPolicyEnv(process.env),
 } as const;
