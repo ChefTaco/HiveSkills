@@ -184,6 +184,50 @@ paths['/v1/skills/{slug}/releases/{version}/archive'].get = {
     500: { description: 'The stored archive no longer matches the release digest' },
   },
 };
+// Signed revocation lists (capability skills.revocations.v1) and the transparency log
+// (skills.transparency-log.v1). Readers are enrolled targets (?target= plus the target bearer token)
+// or registry administrators.
+const trustReader = [{ targetToken: [] }, { resourceBearer: [] }, { nativeSession: [] }];
+const targetParameter = { name: 'target', in: 'query', required: false, description: 'Enrolled target name; send its enrollment token as the bearer token', schema: { type: 'string' } };
+const readerErrors = { 401: { description: 'Target enrollment or sign-in required' }, 403: { description: 'Registry administrator access required' } };
+paths['/v1/revocations'].get = {
+  summary: 'The current signed revocation list',
+  description: 'The list with the highest sequence, exactly as a pinned revocation key signed it: payload is the signed JSON string. The Hermes bridge verifies it against HIVE_SKILLS_REVOCATION_KEYS before activation.',
+  security: trustReader,
+  parameters: [targetParameter],
+  responses: { 200: { description: 'The signed list', content: { 'application/json': { schema: { $ref: '#/components/schemas/SignedRevocationList' } } } }, ...readerErrors, 404: { description: 'No revocation list has been published (revocations_unpublished)' } },
+};
+paths['/admin/revocations'].put = {
+  summary: 'Publish a newer signed revocation list',
+  description: 'The payload must be signed by a key in HIVE_SKILLS_REVOCATION_KEYS, valid, unexpired and of a higher sequence than the current list. Revoked releases are withdrawn from their channels; revoked publisher keys can no longer sign releases. The list is appended to the transparency log.',
+  security: [{ resourceBearer: [] }, { nativeSession: [] }],
+  requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PublishRevocations' } } } },
+  responses: {
+    201: { description: 'Published', content: { 'application/json': { schema: { $ref: '#/components/schemas/RevocationsPublished' } } } },
+    400: { description: 'Invalid, unverifiable or expired list' },
+    401: { description: 'Authentication required' },
+    403: { description: 'Registry administrator access required' },
+    409: { description: 'The sequence is not above the current list' },
+    413: { description: 'Request body is too large' },
+    503: { description: 'HIVE_SKILLS_REVOCATION_KEYS is not configured (revocation_keys_unconfigured)' },
+  },
+};
+paths['/v1/transparency/head'].get = {
+  summary: 'The signed head of the transparency log',
+  description: 'Size, hash of the last entry (64 zeros when empty) and the log public key; signature is Ed25519 over "hiveskills-transparency-head-v1\\n<size>\\n<headHash>\\n".',
+  security: trustReader,
+  parameters: [targetParameter],
+  responses: { 200: { description: 'The head', content: { 'application/json': { schema: { $ref: '#/components/schemas/TransparencyHead' } } } }, ...readerErrors },
+};
+paths['/v1/transparency/entries'].get = {
+  summary: 'Transparency log entries, oldest first',
+  description: 'Entries from index from on. Each entry is the exact JSON string that was hashed and signed; verify the whole log with scripts/verify-transparency-log.mjs. nextFrom is null on the last page.',
+  security: trustReader,
+  parameters: [targetParameter, { name: 'from', in: 'query', required: false, description: 'First index (default 0)', schema: { type: 'integer', minimum: 0 } }, { name: 'limit', in: 'query', required: false, description: 'Page size, 1 to 500 (default 100)', schema: { type: 'integer', minimum: 1, maximum: 500 } }],
+  responses: { 200: { description: 'A page of entries', content: { 'application/json': { schema: { $ref: '#/components/schemas/TransparencyEntries' } } } }, 400: { description: 'Invalid page' }, ...readerErrors },
+};
+paths['/admin/signatures'].get.summary = 'Publisher keys, release signature status, revocations and the log head';
+paths['/admin/signatures'].get.responses[200] = { description: 'The signature overview', content: { 'application/json': { schema: { $ref: '#/components/schemas/SignatureOverview' } } } };
 // The standalone web UI is retired: / only points browsers to HiveXUI.
 paths['/'].get = {
   summary: 'Retired web UI: HiveXUI stub page or redirect',

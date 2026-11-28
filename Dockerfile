@@ -15,6 +15,8 @@ COPY --from=build --chown=node:node /build/node_modules /app/node_modules
 COPY --from=build --chown=node:node /build/dist /app/dist
 COPY --from=build --chown=node:node /build/scripts/archive-utils.mjs /app/scripts/archive-utils.mjs
 COPY --from=build --chown=node:node /build/scripts/hermes-sync.mjs /app/scripts/hermes-sync.mjs
+COPY --from=build --chown=node:node /build/scripts/transparency-log.mjs /app/scripts/transparency-log.mjs
+COPY --from=build --chown=node:node /build/scripts/verify-transparency-log.mjs /app/scripts/verify-transparency-log.mjs
 COPY --from=build --chown=node:node /build/registry-sources /app/registry-sources
 COPY LICENSE NOTICE /app/
 COPY scripts/container-health.mjs /app/healthcheck.mjs

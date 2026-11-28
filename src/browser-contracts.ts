@@ -161,7 +161,37 @@ export const HiveAuditQuery = z.object({
   after: z.string().regex(/^[A-Za-z0-9._~:-]{1,512}$/).optional(),
   limit: z.coerce.number().int().min(1).optional(),
 });
+// Signed revocation lists (GET /v1/revocations, PUT /admin/revocations). `payload` is the exact JSON
+// string a pinned revocation key signed: `hiveskills-revocation-list-v1\n<payload>`.
+const keyId = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/);
+const rawEd25519Key = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+export const PublishRevocations = z.object({ payload: z.string().min(2).max(384 * 1024), signature: ReleaseSignature }).strict();
+export const SignedRevocationList = z.object({ sequence: z.number().int().positive(), payload: z.string(), payloadSha256: digest, signature: ReleaseSignature, publishedAt: z.string() }).strict();
+export const RevocationsPublished = z.object({ sequence: z.number().int().positive(), keys: z.number().int().nonnegative(), releases: z.number().int().nonnegative(), withdrawn: z.array(z.object({ slug: z.string(), version: z.string(), channel: z.enum(['stable', 'canary']) }).strict()) }).strict();
+export const RevokedKey = z.object({ keyId, publicKey: rawEd25519Key, reason: z.string(), revokedAt: z.string() }).strict();
+export const RevokedRelease = z.object({ slug: z.string(), version: z.string(), sha256: digest, reason: z.string(), revokedAt: z.string() }).strict();
+// What a Hermes bridge reports in a receipt about revoked releases and keys it acted on.
+export const ReceiptRevocation = z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/), version: z.string().max(64), reason: z.enum(['release', 'key']), keyId: keyId.optional(), action: z.enum(['refused', 'quarantined', 'reported']) }).strict();
+// The transparency log (GET /v1/transparency/head and /v1/transparency/entries). `entry` is the exact
+// string that was hashed (sha256 of `hiveskills-transparency-entry-v1\n<entry>`) and signed.
+export const TransparencyHead = z.object({ size: z.number().int().nonnegative(), headHash: digest, logKey: z.object({ keyId: z.string().regex(/^log-[a-f0-9]{16}$/), publicKey: rawEd25519Key }).strict(), signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/) }).strict();
+export const TransparencyEntry = z.object({ index: z.number().int().nonnegative(), entry: z.string(), hash: digest, keyId: z.string(), signature: z.string() }).strict();
+export const TransparencyEntries = z.object({ entries: z.array(TransparencyEntry), nextFrom: z.number().int().nonnegative().nullable() }).strict();
+export const TransparencyEntriesQuery = z.object({ from: z.coerce.number().int().min(0).optional(), limit: z.coerce.number().int().min(1).max(500).optional() });
+// GET /admin/signatures: everything the HiveXUI signatures screen shows, in one read.
+export const SignatureStatus = z.enum(['verified', 'unsigned', 'unknown_key', 'invalid', 'revoked_key', 'revoked']);
+export const SignatureOverview = z.object({
+  requireSignedReleases: z.boolean(),
+  publisherKeys: z.array(z.object({ keyId, publicKey: rawEd25519Key, revocation: z.object({ reason: z.string(), revokedAt: z.string() }).strict().nullable() }).strict()),
+  revocationKeys: z.array(z.object({ keyId, publicKey: rawEd25519Key }).strict()),
+  revocations: z.object({ sequence: z.number().int().positive(), issuedAt: z.string(), expiresAt: z.string().nullable(), expired: z.boolean(), signatureKeyId: keyId, payloadSha256: digest, publishedAt: z.string(), keys: z.array(RevokedKey), releases: z.array(RevokedRelease) }).strict().nullable(),
+  releases: z.array(z.object({ slug: z.string(), version: z.string(), sha256: digest, createdAt: z.string(), channels: z.array(z.enum(['stable', 'canary'])), signatureKeyId: keyId.nullable(), status: SignatureStatus }).strict()),
+  releasesTruncated: z.boolean(),
+  log: TransparencyHead,
+}).strict();
 export const browserSchemas = {UpdateSkill,UpdateTarget,PromoteRelease,AuthMe,Ok,EnrollmentResponse,SkillList,ReleaseList,ChannelList,TargetList,AuditList,ReceiptList,DeploymentJobList,
   ManagedDeployment,DeploymentApproval,DeploymentCapabilities,Skill,Release,PinnedRelease,Channel,Target,Audit,Receipt,DeploymentJob,CreateSkill,UploadRelease,UploadArchiveQuery,ReleaseAdvisory,SetReleaseAdvisory,ReleaseSignature,SetReleaseSignature,EnrollTarget,EmptyResponse,
-  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery,HiveAuditRecord,HiveAuditPage,HiveAuditQuery
+  MagnusNodeId,AgentRef,TargetQuery,ReceiptQuery,HiveEvent,HiveEventPage,HiveEventQuery,HiveAuditRecord,HiveAuditPage,HiveAuditQuery,
+  PublishRevocations,SignedRevocationList,RevocationsPublished,RevokedKey,RevokedRelease,ReceiptRevocation,TransparencyHead,TransparencyEntry,TransparencyEntries,TransparencyEntriesQuery,SignatureStatus,SignatureOverview
 };

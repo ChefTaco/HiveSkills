@@ -64,6 +64,14 @@ export const SKILLS_MIGRATIONS: Release['migrations'] = [
     readableBy: '^1.1.0',
     note: 'Add publisher signatures of immutable releases in a side table; release rows and older binaries are unaffected.',
   },
+  {
+    component: 'skills',
+    id: 'managed-format-6',
+    checksum: '15a62552b54d699369fa5ada7af40cb5abb71fb9cb1d5ebbe1f996803bca6f9a',
+    impact: 'fast',
+    readableBy: '^1.1.0',
+    note: 'Add signed revocation lists and the append-only transparency log in new tables; release rows and older binaries are unaffected.',
+  },
 ];
 /** The oldest HiveSkills whose code reads data written by this one. */
 export const SKILLS_DATA_COMPATIBILITY = '^1.1.0';
@@ -124,6 +132,8 @@ export async function skillsMigration(args: readonly string[], automatic = false
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='target_agent_links'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_advisories'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_signatures'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revocation_lists'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transparency_log'").get() ||
           !columns.has('min_hermes_version') ||
           !columns.has('max_hermes_version') ||
           !db.prepare("SELECT id FROM registry_migrations WHERE id='release-channels'").get(),

@@ -1153,6 +1153,40 @@
         ],
         "type": "object"
       },
+      "PublishRevocations": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "maxLength": 393216,
+            "minLength": 2,
+            "type": "string"
+          },
+          "signature": {
+            "additionalProperties": false,
+            "properties": {
+              "keyId": {
+                "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                "type": "string"
+              },
+              "value": {
+                "pattern": "^[A-Za-z0-9_-]{86}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "keyId",
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "payload",
+          "signature"
+        ],
+        "type": "object"
+      },
       "Receipt": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -1243,6 +1277,46 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ReceiptRevocation": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "refused",
+              "quarantined",
+              "reported"
+            ],
+            "type": "string"
+          },
+          "keyId": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "release",
+              "key"
+            ],
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "version",
+          "reason",
+          "action"
+        ],
         "type": "object"
       },
       "Release": {
@@ -1494,6 +1568,118 @@
         ],
         "type": "object"
       },
+      "RevocationsPublished": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "keys": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "releases": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "withdrawn": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "channel": {
+                  "enum": [
+                    "stable",
+                    "canary"
+                  ],
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slug",
+                "version",
+                "channel"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sequence",
+          "keys",
+          "releases",
+          "withdrawn"
+        ],
+        "type": "object"
+      },
+      "RevokedKey": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "keyId": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "type": "string"
+          },
+          "publicKey": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyId",
+          "publicKey",
+          "reason",
+          "revokedAt"
+        ],
+        "type": "object"
+      },
+      "RevokedRelease": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "version",
+          "sha256",
+          "reason",
+          "revokedAt"
+        ],
+        "type": "object"
+      },
       "SetReleaseAdvisory": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -1533,6 +1719,372 @@
         "required": [
           "keyId",
           "value"
+        ],
+        "type": "object"
+      },
+      "SignatureOverview": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "log": {
+            "additionalProperties": false,
+            "properties": {
+              "headHash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "logKey": {
+                "additionalProperties": false,
+                "properties": {
+                  "keyId": {
+                    "pattern": "^log-[a-f0-9]{16}$",
+                    "type": "string"
+                  },
+                  "publicKey": {
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyId",
+                  "publicKey"
+                ],
+                "type": "object"
+              },
+              "signature": {
+                "pattern": "^[A-Za-z0-9_-]{86}$",
+                "type": "string"
+              },
+              "size": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "size",
+              "headHash",
+              "logKey",
+              "signature"
+            ],
+            "type": "object"
+          },
+          "publisherKeys": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "keyId": {
+                  "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                  "type": "string"
+                },
+                "publicKey": {
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "type": "string"
+                },
+                "revocation": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "revokedAt"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "keyId",
+                "publicKey",
+                "revocation"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "releases": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "channels": {
+                  "items": {
+                    "enum": [
+                      "stable",
+                      "canary"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "signatureKeyId": {
+                  "anyOf": [
+                    {
+                      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "verified",
+                    "unsigned",
+                    "unknown_key",
+                    "invalid",
+                    "revoked_key",
+                    "revoked"
+                  ],
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slug",
+                "version",
+                "sha256",
+                "createdAt",
+                "channels",
+                "signatureKeyId",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "releasesTruncated": {
+            "type": "boolean"
+          },
+          "requireSignedReleases": {
+            "type": "boolean"
+          },
+          "revocationKeys": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "keyId": {
+                  "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                  "type": "string"
+                },
+                "publicKey": {
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "keyId",
+                "publicKey"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "revocations": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "expired": {
+                    "type": "boolean"
+                  },
+                  "expiresAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "issuedAt": {
+                    "type": "string"
+                  },
+                  "keys": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "keyId": {
+                          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                          "type": "string"
+                        },
+                        "publicKey": {
+                          "pattern": "^[A-Za-z0-9_-]{43}$",
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "keyId",
+                        "publicKey",
+                        "reason",
+                        "revokedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "payloadSha256": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "publishedAt": {
+                    "type": "string"
+                  },
+                  "releases": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        },
+                        "sha256": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "slug",
+                        "version",
+                        "sha256",
+                        "reason",
+                        "revokedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "sequence": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer"
+                  },
+                  "signatureKeyId": {
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sequence",
+                  "issuedAt",
+                  "expiresAt",
+                  "expired",
+                  "signatureKeyId",
+                  "payloadSha256",
+                  "publishedAt",
+                  "keys",
+                  "releases"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "requireSignedReleases",
+          "publisherKeys",
+          "revocationKeys",
+          "revocations",
+          "releases",
+          "releasesTruncated",
+          "log"
+        ],
+        "type": "object"
+      },
+      "SignatureStatus": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "enum": [
+          "verified",
+          "unsigned",
+          "unknown_key",
+          "invalid",
+          "revoked_key",
+          "revoked"
+        ],
+        "type": "string"
+      },
+      "SignedRevocationList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "type": "string"
+          },
+          "payloadSha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "signature": {
+            "additionalProperties": false,
+            "properties": {
+              "keyId": {
+                "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                "type": "string"
+              },
+              "value": {
+                "pattern": "^[A-Za-z0-9_-]{86}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "keyId",
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "sequence",
+          "payload",
+          "payloadSha256",
+          "signature",
+          "publishedAt"
         ],
         "type": "object"
       },
@@ -1699,6 +2251,156 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "TransparencyEntries": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "entry": {
+                  "type": "string"
+                },
+                "hash": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "index": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "keyId": {
+                  "type": "string"
+                },
+                "signature": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "index",
+                "entry",
+                "hash",
+                "keyId",
+                "signature"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "nextFrom": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "entries",
+          "nextFrom"
+        ],
+        "type": "object"
+      },
+      "TransparencyEntriesQuery": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TransparencyEntry": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "entry": {
+            "type": "string"
+          },
+          "hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "index": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "keyId": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "entry",
+          "hash",
+          "keyId",
+          "signature"
+        ],
+        "type": "object"
+      },
+      "TransparencyHead": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "headHash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "logKey": {
+            "additionalProperties": false,
+            "properties": {
+              "keyId": {
+                "pattern": "^log-[a-f0-9]{16}$",
+                "type": "string"
+              },
+              "publicKey": {
+                "pattern": "^[A-Za-z0-9_-]{43}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "keyId",
+              "publicKey"
+            ],
+            "type": "object"
+          },
+          "signature": {
+            "pattern": "^[A-Za-z0-9_-]{86}$",
+            "type": "string"
+          },
+          "size": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size",
+          "headHash",
+          "logKey",
+          "signature"
+        ],
         "type": "object"
       },
       "UpdateSkill": {
@@ -2413,6 +3115,91 @@
           }
         ],
         "summary": "GET /admin/receipts"
+      }
+    },
+    "/admin/revocations": {
+      "put": {
+        "description": "The payload must be signed by a key in HIVE_SKILLS_REVOCATION_KEYS, valid, unexpired and of a higher sequence than the current list. Revoked releases are withdrawn from their channels; revoked publisher keys can no longer sign releases. The list is appended to the transparency log.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRevocations"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationsPublished"
+                }
+              }
+            },
+            "description": "Published"
+          },
+          "400": {
+            "description": "Invalid, unverifiable or expired list"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Registry administrator access required"
+          },
+          "409": {
+            "description": "The sequence is not above the current list"
+          },
+          "413": {
+            "description": "Request body is too large"
+          },
+          "503": {
+            "description": "HIVE_SKILLS_REVOCATION_KEYS is not configured (revocation_keys_unconfigured)"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "Publish a newer signed revocation list"
+      }
+    },
+    "/admin/signatures": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureOverview"
+                }
+              }
+            },
+            "description": "The signature overview"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          }
+        },
+        "security": [
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "Publisher keys, release signature status, revocations and the log head"
       }
     },
     "/admin/skills": {
@@ -3228,6 +4015,55 @@
         "summary": "HiveEvent v1 feed of deployment outcomes, agent restart failures and skill release changes"
       }
     },
+    "/v1/revocations": {
+      "get": {
+        "description": "The list with the highest sequence, exactly as a pinned revocation key signed it: payload is the signed JSON string. The Hermes bridge verifies it against HIVE_SKILLS_REVOCATION_KEYS before activation.",
+        "parameters": [
+          {
+            "description": "Enrolled target name; send its enrollment token as the bearer token",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedRevocationList"
+                }
+              }
+            },
+            "description": "The signed list"
+          },
+          "401": {
+            "description": "Target enrollment or sign-in required"
+          },
+          "403": {
+            "description": "Registry administrator access required"
+          },
+          "404": {
+            "description": "No revocation list has been published (revocations_unpublished)"
+          }
+        },
+        "security": [
+          {
+            "targetToken": []
+          },
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "The current signed revocation list"
+      }
+    },
     "/v1/skills": {
       "get": {
         "responses": {
@@ -3428,6 +4264,122 @@
           }
         ],
         "summary": "Skill release archive with its SHA-256 digest"
+      }
+    },
+    "/v1/transparency/entries": {
+      "get": {
+        "description": "Entries from index from on. Each entry is the exact JSON string that was hashed and signed; verify the whole log with scripts/verify-transparency-log.mjs. nextFrom is null on the last page.",
+        "parameters": [
+          {
+            "description": "Enrolled target name; send its enrollment token as the bearer token",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "First index (default 0)",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, 1 to 500 (default 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransparencyEntries"
+                }
+              }
+            },
+            "description": "A page of entries"
+          },
+          "400": {
+            "description": "Invalid page"
+          },
+          "401": {
+            "description": "Target enrollment or sign-in required"
+          },
+          "403": {
+            "description": "Registry administrator access required"
+          }
+        },
+        "security": [
+          {
+            "targetToken": []
+          },
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "Transparency log entries, oldest first"
+      }
+    },
+    "/v1/transparency/head": {
+      "get": {
+        "description": "Size, hash of the last entry (64 zeros when empty) and the log public key; signature is Ed25519 over \"hiveskills-transparency-head-v1\\n<size>\\n<headHash>\\n\".",
+        "parameters": [
+          {
+            "description": "Enrolled target name; send its enrollment token as the bearer token",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransparencyHead"
+                }
+              }
+            },
+            "description": "The head"
+          },
+          "401": {
+            "description": "Target enrollment or sign-in required"
+          },
+          "403": {
+            "description": "Registry administrator access required"
+          }
+        },
+        "security": [
+          {
+            "targetToken": []
+          },
+          {
+            "resourceBearer": []
+          },
+          {
+            "nativeSession": []
+          }
+        ],
+        "summary": "The signed head of the transparency log"
       }
     }
   },

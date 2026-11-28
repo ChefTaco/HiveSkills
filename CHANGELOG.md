@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Signed revocation lists. A revocation authority key, pinned separately from the publisher keys with the new `HIVE_SKILLS_REVOCATION_KEYS`, signs a list of revoked publisher keys and releases (`node scripts/sign-release.mjs sign-revocations`). `PUT /admin/revocations` accepts a list only when such a key signed it, it has not expired and its `sequence` is above the current one; `GET /v1/revocations` serves it unchanged to enrolled targets and administrators. Publishing withdraws every revoked release from its channels (audited as automatic `release.withdraw`, in the event feed), and the registry then refuses to promote or re-upload a revoked version and refuses new signatures by a revoked key. Lists are append-only.
+- The Hermes bridge checks revocations. With `HIVE_SKILLS_REVOCATION_KEYS` in its environment it reads and verifies the list on every run, before activation, and fails closed on a missing, unverifiable, older (the highest sequence seen is kept in its state file), swapped or expired list. A revoked release, or one whose only valid signature is by a revoked publisher key, is refused before download; installed ones are quarantined, or with `HIVE_SKILLS_REVOKED_INSTALLED=report` only reported. The bridge reports it to the registry in a receipt with the new status `revoked` and a `revocations` list, which `POST /v1/agent/receipts/:target` now accepts.
+- An append-only transparency log of release publications, signatures and revocation lists: hash-chained, each entry and the head signed by the registry's log key (created on first use as `transparency-log-key.pem` in the data directory, or `HIVE_SKILLS_TRANSPARENCY_KEY_FILE`), written in the same transaction as the change and refused any update or delete by the database. Existing releases are recorded once at startup, marked `backfilled`. `GET /v1/transparency/head` and `GET /v1/transparency/entries` serve it read-only to enrolled targets and administrators, and `scripts/verify-transparency-log.mjs` verifies it end to end (links, signatures, digests, sequences, publisher signatures and revocation lists, and growth since a known head), online or from a saved copy.
+- `GET /admin/signatures`: pinned publisher and revocation keys, every release's signature status (`verified`, `unsigned`, `unknown_key`, `invalid`, `revoked_key`, `revoked`), the current revocation list and the log head, for the HiveXUI signatures screen. Browser contracts and the OpenAPI snapshot describe all new routes, and health bodies list the capabilities `skills.revocations.v1` and `skills.transparency-log.v1`.
+
 ### Changed
 
 - CI fails when a document names a version that is no longer current (`npm run check:doc-versions`, tests in `npm test`): HiveSkills image tags, links into a Hive suite release, and "Hive X.Y.Z pins …" claims, which name no version because the signed suite release manifest is their only source. `CHANGELOG.md` and the retired 1.x launcher's documents (`hive/blob/v1.2.2`) are exempt.
@@ -10,6 +17,15 @@
 ### Deprecated
 
 - The static Magnus executor bearer (`credentialFile`). Configure `oathweave`, keep `credentialFile` as the fallback while Magnus is upgraded and linked, then remove it.
+
+### Migrations
+
+- `managed-format-6` (fast, additive): new tables `revocation_lists` and `transparency_log` with triggers that refuse updates and deletes. Release rows are untouched and older binaries can read the data (`readableBy ^1.1.0`); a suite upgrade needs `--allow-migrations` for HiveSkills.
+
+### Upgrade notes
+
+- Registry: nothing is required. On first start the registry creates its transparency log key in the data directory (include it in backups; losing it means later entries are signed by a new key) and records existing releases in the log. To use revocations, generate a revocation authority key offline, set `HIVE_SKILLS_REVOCATION_KEYS` and publish an initial list (it may be empty).
+- Agent hosts: redeploy the bridge (`scripts/hermes-sync.mjs` and `scripts/archive-utils.mjs`, or a new native client) to get revocation checks. Set `HIVE_SKILLS_REVOCATION_KEYS` in `bridge.env` only after the registry serves a list: a bridge that pins revocation keys refuses to sync while there is none. Hosts that pin no revocation key behave as before.
 
 ## [1.11.1] - 2026-11-26
 
