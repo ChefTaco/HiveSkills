@@ -27,6 +27,25 @@
 - Registry: nothing is required. On first start the registry creates its transparency log key in the data directory and records existing releases in the log. Backups of the data directory now hold that private key: protect them, and rotate the key (README, "Transparency log") if one leaks. Re-uploading a version that existed before (for example after deleting a skill) is now refused; use a new version. To use revocations, generate a revocation authority key offline, set `HIVE_SKILLS_REVOCATION_KEYS` and publish an initial list (it may be empty).
 - Agent hosts: redeploy the bridge (`scripts/hermes-sync.mjs` and `scripts/archive-utils.mjs`, or a new native client) to get revocation checks. Set `HIVE_SKILLS_REVOCATION_KEYS` in `bridge.env` only after the registry serves a list: a bridge that pins revocation keys refuses to sync while there is none. Optionally set `HIVE_SKILLS_MIN_REVOCATION_SEQUENCE`. Hosts that pin no revocation key behave as before.
 
+### Fixed
+
+- The private-data check (`scripts/check-private-data.sh`) fails closed. A commit-message input
+  large enough to fill a pipe, such as a new branch's whole history at pre-push, passed even when
+  it named a private term: `grep -q` exited early and the resulting SIGPIPE read as "no match". An
+  unreadable denylist, message file or staged file, or an invalid pattern, now stops the check
+  (exit 2) instead of passing.
+- The pre-push hook checks outgoing commits only: a new branch is compared with the push target's
+  remote-tracking branches, so a commit that removes an already-published term can be pushed
+  without bypassing the hooks.
+- The private-data check also checks commit-message lines that start with `#` (git keeps them with
+  `-m`), lists files NUL-separated so non-ASCII names are checked, validates each `.private-terms`
+  line as a pattern of its own, strips carriage returns from it, exits 2 when it is a directory or
+  a dangling link, and reports an unreadable file without its name. The pre-push hook counts only
+  the push target's tracking branches as published; a push to a URL rather than a configured
+  remote checks the whole history.
+- `scripts/privacy-fail-closed.test.sh` (run in CI) covers 50 MB messages, 3000-commit pushes and
+  a removal-only push with a test-only term. Repository tooling only; nothing to do when upgrading.
+
 ## [1.11.1] - 2026-11-26
 
 Repository tooling only: the image's runtime code is unchanged from 1.11.0.
