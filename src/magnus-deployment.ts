@@ -12,10 +12,11 @@ const httpsUrl = z.url().refine((value) => {
 });
 
 /**
- * `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON`: an HTTPS URL without credentials, query or fragment, and
- * exactly one way to authenticate to it: `credentialFile`, a long-lived bearer read from a protected
- * file, or `oathweave`, this registry's own Oathweave client (`client_credentials`), which gives
- * short-lived tokens bound to the executor's `audience`.
+ * `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON`: an HTTPS URL without credentials, query or fragment, and at
+ * least one way to authenticate to it: `oathweave`, this registry's own Oathweave client
+ * (`client_credentials`), which gives short-lived tokens bound to the executor's `audience`, and/or
+ * `credentialFile`, a long-lived bearer read from a protected file (deprecated). With both, the
+ * Oathweave token is preferred and the file is the fallback (see `executeMagnusJob`).
  */
 export const executorConfiguration = z.object({
   url: httpsUrl,
@@ -28,8 +29,8 @@ export const executorConfiguration = z.object({
     scope: z.string().min(1).max(1024).optional(),
   }).strict().optional(),
   caFile: z.string().min(1).optional(),
-}).strict().refine((value) => (value.credentialFile === undefined) !== (value.oathweave === undefined), {
-  message: 'Configure exactly one of credentialFile or oathweave',
+}).strict().refine((value) => value.credentialFile !== undefined || value.oathweave !== undefined, {
+  message: 'Configure oathweave, credentialFile, or both',
 });
 export type ExecutorConfiguration = z.infer<typeof executorConfiguration>;
 
@@ -92,13 +93,21 @@ export function executorTokenProvider(oathweave: NonNullable<ExecutorConfigurati
 /** No executor credential could be obtained, so nothing was sent to Magnus. */
 export class ExecutorNotDispatchedError extends Error {}
 
-/** The bearer for one executor request. */
-async function executorBearer(config: ExecutorConfiguration): Promise<string> {
+/** The bearer from the static credential file, or ExecutorNotDispatchedError. */
+function staticBearer(credentialFile: string): string {
   try {
-    if (config.oathweave) return await executorTokenProvider(config.oathweave).token();
-    return readProtectedSecret(config.credentialFile!, 32);
+    return readProtectedSecret(credentialFile, 32);
   } catch (error) {
     throw new ExecutorNotDispatchedError(error instanceof Error ? error.message : 'Magnus executor credential unavailable');
+  }
+}
+
+/** A token from the Oathweave client, or ExecutorNotDispatchedError. */
+async function oathweaveBearer(oathweave: NonNullable<ExecutorConfiguration['oathweave']>): Promise<string> {
+  try {
+    return await executorTokenProvider(oathweave).token();
+  } catch (error) {
+    throw new ExecutorNotDispatchedError(error instanceof Error ? error.message : 'Magnus executor token unavailable');
   }
 }
 
@@ -132,9 +141,13 @@ const httpsTransport: ExecutorTransport = (url, options) => new Promise<Executor
 
 /**
  * Dispatch an approved job to Magnus (POST), or with `reconcile` ask for the outcome of an earlier
- * dispatch of the same job id (GET) without replaying it. The reply is bounded to 64 KiB. With an
- * Oathweave client, a `401` (an expired or revoked token, refused before the job is admitted) is
- * retried once with a fresh token.
+ * dispatch of the same job id (GET) without replaying it. The reply is bounded to 64 KiB.
+ *
+ * With an Oathweave client, a `401` (an expired or revoked token) is retried once with a fresh
+ * token. When `credentialFile` is configured too, HiveSkills falls back to it once when no token can
+ * be obtained, or when Magnus still refuses the token with `401` or `403` (a Magnus without
+ * Oathweave support for this route, or a client it has not linked). Magnus answers those before it
+ * admits a job, so a fallback never dispatches the job twice.
  */
 export async function executeMagnusJob(id: string, reconcile = false, transport: ExecutorTransport = httpsTransport): Promise<MagnusReply> {
   const config = magnusExecutorConfiguration();
@@ -148,16 +161,44 @@ export async function executeMagnusJob(id: string, reconcile = false, transport:
     manifest: JSON.parse(String(row.manifest_json)),
     approvedBy: row.actor,
   });
-  const send = async () => transport(url, {
+  const send = async (bearer: string) => transport(url, {
     method: reconcile ? 'GET' : 'POST',
-    bearer: await executorBearer(config),
+    bearer,
     ...(config.caFile ? { ca: readFileSync(config.caFile) } : {}),
     body,
   });
-  let answer = await send();
-  if (answer.status === 401 && config.oathweave) {
-    executorTokenProvider(config.oathweave).invalidate();
-    answer = await send();
+  const fallback = config.credentialFile;
+  let answer: ExecutorAnswer;
+  if (!config.oathweave) {
+    answer = await send(staticBearer(fallback!));
+  } else {
+    let token: string | undefined;
+    try {
+      token = await oathweaveBearer(config.oathweave);
+    } catch (error) {
+      if (!fallback) throw error;
+      console.warn('magnus executor: no Oathweave token available; using the static credential file');
+    }
+    if (token === undefined) {
+      answer = await send(staticBearer(fallback!));
+    } else {
+      answer = await send(token);
+      if (answer.status === 401) {
+        executorTokenProvider(config.oathweave).invalidate();
+        let fresh: string | undefined;
+        try {
+          fresh = await oathweaveBearer(config.oathweave);
+        } catch (error) {
+          if (!fallback) throw error;
+        }
+        // Without a fresh token the 401 stands, and the static credential is tried below.
+        if (fresh !== undefined) answer = await send(fresh);
+      }
+      if ((answer.status === 401 || answer.status === 403) && fallback) {
+        console.warn(`magnus executor: Magnus refused the Oathweave token (${answer.status}); using the static credential file`);
+        answer = await send(staticBearer(fallback));
+      }
+    }
   }
   try {
     if (answer.status !== 200) throw new Error('Magnus job rejected or unavailable');
