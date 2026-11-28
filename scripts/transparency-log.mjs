@@ -60,9 +60,11 @@ const signatureValid = (key, message, value) => {
  * sequence to the payload string served by GET /v1/revocations/<sequence>) lets every revocation list
  * be checked against its logged digest and, with `revocationKeys`, its signature; with revocation keys
  * the payloads are required. `knownHead` ({size, headHash}, from an earlier run) must be a prefix of
- * this log. Throws on the first broken link, bad signature, digest change or rollback; returns a summary.
+ * this log. With `maxHeadAgeSeconds`, a head signed longer ago than that (or more than five minutes in
+ * the future) is refused, so a registry cannot keep serving an old head. Throws on the first broken
+ * link, bad signature, digest change, stale head or rollback; returns a summary.
  */
-export function verifyTransparencyLog({ entries, head, logKeys, publisherKeys, revocationKeys, revocationPayloads, knownHead }) {
+export function verifyTransparencyLog({ entries, head, logKeys, publisherKeys, revocationKeys, revocationPayloads, knownHead, maxHeadAgeSeconds, now = Date.now() }) {
   if (!Array.isArray(entries)) throw new Error('Transparency log entries must be an array');
   if (!head || typeof head !== 'object' || !head.logKey || typeof head.logKey !== 'object') throw new Error('A signed log head is required');
   const warnings = [];
@@ -150,6 +152,12 @@ export function verifyTransparencyLog({ entries, head, logKeys, publisherKeys, r
   if (!headKey || head.logKey.keyId !== logKeyId(head.logKey.publicKey)) throw new Error(`The head is signed by log key ${head.logKey.keyId}, which is not trusted`);
   if (typeof head.signedAt !== 'string' || !Number.isFinite(Date.parse(head.signedAt))) throw new Error('The head has no valid signedAt');
   if (!signatureValid(headKey, headSigningMessage(head.size, head.headHash, head.signedAt, head.logKey.keyId), head.signature)) throw new Error('The head signature does not verify');
+  if (maxHeadAgeSeconds !== undefined) {
+    if (!Number.isSafeInteger(maxHeadAgeSeconds) || maxHeadAgeSeconds < 1) throw new Error('The maximum head age must be a positive number of seconds');
+    const age = (now - Date.parse(head.signedAt)) / 1000;
+    if (age > maxHeadAgeSeconds) throw new Error(`The head was signed ${Math.round(age)} seconds ago, longer than the allowed ${maxHeadAgeSeconds}`);
+    if (age < -300) throw new Error('The head is signed in the future');
+  }
   if (knownHead) {
     if (!Number.isSafeInteger(knownHead.size) || knownHead.size > entries.length) throw new Error(`The log shrank: ${entries.length} entries, but ${knownHead.size} were seen before`);
     const expected = knownHead.size === 0 ? GENESIS_HASH : entries[knownHead.size - 1].hash;

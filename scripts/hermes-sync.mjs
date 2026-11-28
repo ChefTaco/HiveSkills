@@ -101,19 +101,25 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     if (target) { if (!token) throw new Error('Target token required'); manifestUrl.searchParams.set('target', target); }
     if (hermesVersion) { if (!versionParts(hermesVersion)) throw new Error('Invalid local Hermes version'); manifestUrl.searchParams.set('hermes_version', hermesVersion); }
     const manifest = frozenManifest ?? JSON.parse((await boundedResponse(await fetchImpl(manifestUrl, { ...(target ? { headers: { authorization: `Bearer ${token}` } } : {}), redirect: 'error', signal: AbortSignal.timeout(20_000) }), 1024 * 1024)).toString('utf8'));
-    if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.skills) || manifest.skills.length > 1000) throw new Error('Unsupported manifest');
-    const channel = manifest.channel ?? 'stable';
-    if (channel !== 'stable' && channel !== 'canary') throw new Error('Unsupported manifest channel');
+    // A manifest the bridge refuses still fails the sync, but only after revoked installed skills
+    // were dealt with: a registry cannot keep them running by serving an unusable manifest.
     const desired = new Set();
-    for (const skill of manifest.skills) {
-      if (!safeSlug(skill.slug) || desired.has(skill.slug) || !/^[a-f0-9]{64}$/.test(skill.sha256) || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(skill.version)) throw new Error('Unsafe manifest entry');
-      if (!compatibleVersion(hermesVersion, skill.compatibility)) throw new Error(`Skill ${skill.slug} is incompatible with this Hermes runtime`);
-      const archiveUrl = new URL(skill.archiveUrl);
-      const expected = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}/archive`);
-      if (channel !== 'stable') expected.searchParams.set('channel', channel);
-      if (archiveUrl.href !== expected.href) throw new Error('Unexpected archive origin or path');
-      desired.add(skill.slug);
-    }
+    let manifestError = null;
+    try {
+      if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.skills) || manifest.skills.length > 1000) throw new Error('Unsupported manifest');
+      const channel = manifest.channel ?? 'stable';
+      if (channel !== 'stable' && channel !== 'canary') throw new Error('Unsupported manifest channel');
+      for (const skill of manifest.skills) {
+        if (!safeSlug(skill.slug) || desired.has(skill.slug) || !/^[a-f0-9]{64}$/.test(skill.sha256) || !/^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/i.test(skill.version)) throw new Error('Unsafe manifest entry');
+        if (!compatibleVersion(hermesVersion, skill.compatibility)) throw new Error(`Skill ${skill.slug} is incompatible with this Hermes runtime`);
+        const archiveUrl = new URL(skill.archiveUrl);
+        const expected = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}/archive`);
+        if (channel !== 'stable') expected.searchParams.set('channel', channel);
+        if (archiveUrl.href !== expected.href) throw new Error('Unexpected archive origin or path');
+        desired.add(skill.slug);
+      }
+    } catch (error) { manifestError = error; }
+    const offered = manifestError ? [] : manifest.skills;
     const needsInstall = (skill) => !(prior.skills?.[skill.slug]?.sha256 === skill.sha256 && existsSync(resolve(root, skill.slug, 'SKILL.md')));
     const postReceipt = async (body) => {
       atomicJson(resolve(control, 'receipt.json'), { registry: origin.href, completedAt: new Date().toISOString(), ...body });
@@ -148,23 +154,32 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
         atomicJson(statePath, { ...prior, registry: origin.href });
       }
     }
-    // Findings about revoked releases and keys: {slug, version, reason, keyId?, install, why}. A
-    // release is revoked by slug and version or by digest, so the same bytes relabelled as another
-    // version stay revoked. Besides what the manifest offers, the release each installed skill
-    // actually runs (as recorded when it was installed) is checked, whatever the manifest calls it now.
+    // Findings about revoked releases and keys: {slug, version, reason, keyId?, install, why, source}.
+    // `source` is `manifest` for a release the manifest offers and `installed` for what a skill runs
+    // now. A release is revoked by slug and version or by digest, so the same bytes relabelled as
+    // another version stay revoked. Every installed skill is checked on its own, whatever the manifest
+    // offers for it now: the release it runs (as recorded at installation) and the key that vouched
+    // for those bytes when they were verified. Those findings are acted on (quarantined or reported)
+    // before anything the manifest offers can fail the sync.
     const revoked = [];
+    const rememberedKeyOf = (remembered) => typeof remembered?.key === 'string' ? remembered.key.slice(remembered.key.lastIndexOf(':') + 1) : undefined;
     if (revocations) {
-      for (const skill of manifest.skills) {
+      for (const skill of offered) {
         const entry = releaseRevocation(revocations, skill);
-        if (entry) revoked.push({ slug: skill.slug, version: skill.version, reason: 'release', install: needsInstall(skill), why: entry.reason });
+        if (entry) revoked.push({ slug: skill.slug, version: skill.version, reason: 'release', install: needsInstall(skill), why: entry.reason, source: 'manifest' });
       }
       for (const [slug, installed] of Object.entries(prior.skills ?? {})) {
         if (!safeSlug(slug) || !existsSync(resolve(root, slug)) || revoked.some((entry) => entry.slug === slug && !entry.install)) continue;
         const entry = releaseRevocation(revocations, { slug, version: installed?.version, sha256: installed?.sha256 });
-        if (entry) revoked.push({ slug, version: String(installed.version), reason: 'release', install: false, why: entry.reason });
+        if (entry) { revoked.push({ slug, version: String(installed.version), reason: 'release', install: false, why: entry.reason, source: 'installed' }); continue; }
+        const remembered = prior.verifiedSignatures?.[slug];
+        const keyEntry = remembered?.sha256 === installed?.sha256 ? keyRevocation(revocations, rememberedKeyOf(remembered)) : undefined;
+        if (keyEntry) revoked.push({ slug, version: String(installed.version), reason: 'key', keyId: remembered.keyId, install: false, why: keyEntry.reason, source: 'installed' });
       }
     }
-    const isRevoked = (slug) => revoked.some((entry) => entry.slug === slug);
+    // Only a revoked manifest release skips the signature check; a revoked installed skill does not
+    // excuse a new version of it from being signed.
+    const manifestRevoked = (slug) => revoked.some((entry) => entry.slug === slug && entry.source === 'manifest');
     // With pinned publisher keys, every release about to be installed must carry a valid signature
     // from one of them. All are checked before anything is activated, so a registry or an
     // administrator session cannot push code the publisher did not sign. Skills installed before the
@@ -178,25 +193,31 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
       const keyStamp = (keyId) => { const key = publisherKeys.get(keyId); return key ? `${keyId}:${key.export({ format: 'jwk' }).x}` : undefined; };
       const revokedKey = (keyId) => keyRevocation(revocations, publisherKeys.get(keyId));
       const refused = []; const unsigned = [];
-      for (const skill of manifest.skills) {
-        if (isRevoked(skill.slug)) continue;
+      for (const skill of offered) {
+        if (manifestRevoked(skill.slug)) continue;
         const install = needsInstall(skill);
         const remembered = prior.verifiedSignatures?.[skill.slug];
-        // The key that vouched for the installed bytes when they were verified. If it is revoked now,
-        // the installed skill stays revoked unless a fresh, valid signature by an unrevoked key comes.
-        const rememberedKey = typeof remembered?.key === 'string' ? remembered.key.slice(remembered.key.lastIndexOf(':') + 1) : undefined;
-        const installedKeyRevoked = !install && remembered?.sha256 === prior.skills?.[skill.slug]?.sha256 ? keyRevocation(revocations, rememberedKey) : undefined;
-        if (!install && !installedKeyRevoked && remembered && remembered.sha256 === skill.sha256 && remembered.key === keyStamp(remembered.keyId)) { verifiedSignatures[skill.slug] = remembered; continue; }
+        // An installed skill whose verifying key is revoked stays revoked unless the registry serves a
+        // fresh, valid signature of the same bytes by an unrevoked key.
+        const installedFinding = revoked.findIndex((entry) => entry.slug === skill.slug && entry.source === 'installed');
+        if (!install && installedFinding >= 0 && revoked[installedFinding].reason === 'release') continue;
+        if (!install && installedFinding < 0 && remembered && remembered.sha256 === skill.sha256 && remembered.key === keyStamp(remembered.keyId)) { verifiedSignatures[skill.slug] = remembered; continue; }
         const url = new URL(origin.href.replace(/\/$/, '') + `/v1/skills/${skill.slug}/releases/${skill.version}`);
         url.searchParams.set('target', target);
-        const metadata = JSON.parse((await boundedResponse(await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 64 * 1024)).toString('utf8'));
-        if (metadata.slug !== skill.slug || metadata.version !== skill.version || metadata.sha256 !== skill.sha256) throw new Error(`Release metadata for ${skill.slug} differs from the manifest`);
+        let metadata;
+        try { metadata = JSON.parse((await boundedResponse(await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(20_000) }), 64 * 1024)).toString('utf8')); }
+        catch { metadata = null; }
+        // Unreadable or mismatched metadata is a refusal for this release, not an early failure that
+        // would keep revoked installed skills running.
+        if (!metadata || metadata.slug !== skill.slug || metadata.version !== skill.version || metadata.sha256 !== skill.sha256) { if (install || installedFinding < 0) (install ? refused : unsigned).push(`${skill.slug} ${skill.version} (release metadata unavailable or differs from the manifest)`); continue; }
         const signedBy = verifyReleaseSignature(publisherKeys, skill, metadata.signature) ? metadata.signature.keyId : null;
         const keyEntry = signedBy && revokedKey(signedBy);
-        if (keyEntry) revoked.push({ slug: skill.slug, version: skill.version, reason: 'key', keyId: signedBy, install, why: keyEntry.reason });
-        else if (signedBy) verifiedSignatures[skill.slug] = { sha256: skill.sha256, keyId: signedBy, key: keyStamp(signedBy) };
-        else if (installedKeyRevoked) revoked.push({ slug: skill.slug, version: skill.version, reason: 'key', keyId: remembered.keyId, install: false, why: installedKeyRevoked.reason });
-        else (install ? refused : unsigned).push(`${skill.slug} ${skill.version}`);
+        if (keyEntry) {
+          if (installedFinding < 0 || install) revoked.push({ slug: skill.slug, version: skill.version, reason: 'key', keyId: signedBy, install, why: keyEntry.reason, source: 'manifest' });
+        } else if (signedBy) {
+          verifiedSignatures[skill.slug] = { sha256: skill.sha256, keyId: signedBy, key: keyStamp(signedBy) };
+          if (!install && installedFinding >= 0) revoked.splice(installedFinding, 1); // Re-signed by a valid key.
+        } else if (install || installedFinding < 0) (install ? refused : unsigned).push(`${skill.slug} ${skill.version}`);
       }
       signatureFindings.refused = refused; signatureFindings.unsigned = unsigned;
     }
@@ -227,6 +248,7 @@ export async function syncSkills({ registry, hermesHome = resolve(homedir(), '.h
     }
     if (signatureFindings.unsigned.length) console.warn(`Installed skills without a valid signature from a pinned publisher key stay active (set HIVE_SKILLS_UNSIGNED_INSTALLED=quarantine to remove them): ${signatureFindings.unsigned.join(', ')}`);
     if (revokedInstalledSkills.length) console.warn(`Installed skills whose release or signing key is revoked stay active because HIVE_SKILLS_REVOKED_INSTALLED=report: ${revokedInstalledSkills.map(describe).join(', ')}`);
+    if (manifestError) throw manifestError;
     const revokedInstall = revoked.filter((entry) => entry.install);
     if (revokedInstall.length) {
       await reportRevoked('reported');

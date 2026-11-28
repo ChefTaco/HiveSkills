@@ -355,7 +355,9 @@ list replaces the previous one, so carry earlier entries forward, and `sequence`
 registry refuses a list whose sequence is not above the current one, an expired one and one not
 signed by a pinned revocation key (`503` when no revocation key is configured). A release is
 revoked by slug and version and also by its digest, so the same archive cannot return under another
-version or skill; a key is revoked by its public key, whatever id names it. On publication the
+version or skill; a key is revoked by its public key, whatever id names it. The registry records the
+public key that made each stored signature, so the releases of a revoked key are still recognised
+after that key is removed from `HIVE_SKILLS_PUBLISHER_KEYS`. On publication the
 registry withdraws from their channels every revoked release and every release signed by a pinned
 key the list revokes (audited as automatic `release.withdraw` by `system`, shown in the event feed).
 From then on it refuses to promote, upload or re-upload a revoked release (checked again in the
@@ -379,9 +381,13 @@ it as you publish). A revoked release, or one whose only valid signature is by a
 key (with `HIVE_SKILLS_PUBLISHER_KEYS` pinned), is refused before download. The bridge checks both
 what the manifest offers and what each installed skill actually runs (the version and digest it
 recorded at installation), matching by digest as well, so a registry cannot keep revoked bytes
-running by relabelling them. An installed release whose verified signing key is revoked stays
-revoked unless the registry serves a fresh valid signature by an unrevoked key; withholding the
-signature does not make it merely "unsigned". Installed revoked ones are quarantined (moved to `~/.hermes/.hive-skills-sync/<slug>.quarantined`,
+running by relabelling them. Each installed skill is also checked against the key that verified it,
+whatever version the manifest now offers: an installed release whose signing key is revoked stays
+revoked unless the registry serves a fresh valid signature of the same bytes by an unrevoked key, and
+withholding the signature does not make it merely "unsigned". These installed skills are dealt with
+before anything the manifest offers can fail the sync (an unusable manifest, a refused new version,
+unreadable release metadata), and a revoked installed skill never excuses a new version of it from
+its own signature check. Installed revoked ones are quarantined (moved to `~/.hermes/.hive-skills-sync/<slug>.quarantined`,
 gateway restarted, sync failed) unless `HIVE_SKILLS_REVOKED_INSTALLED=report`, which keeps them
 active and logs them. The bridge reports what it did in its receipt: status `revoked` with
 `revocations: [{slug, version, reason: "release"|"key", keyId?, action: "refused"|"quarantined"|"reported"}]`
@@ -396,7 +402,8 @@ the releases it removed (`skill.deleted`) is appended to an append-only, hash-ch
 database transaction as the change it records. A version the log has ever recorded can never be
 uploaded again, even after its skill was deleted (`409`): releases are immutable. On every start the
 registry records whatever was stored without an entry (releases from before the log existed, or
-written by a restored backup), marked `backfilled`, and withdraws revoked releases again. Each entry is the
+written by a restored backup), marked `backfilled`, and withdraws revoked releases again; a registry
+that cannot do so refuses to start. Each entry is the
 exact JSON string `{"v":1,"index","previousHash","kind","recordedAt","subject"}`; its hash is the
 SHA-256 of `hiveskills-transparency-entry-v1\n<entry>`, `previousHash` links it to the entry before
 (64 zeros for the first), and the registry's log key signs
@@ -424,14 +431,15 @@ registry administrators. Verify the whole log end to end, online or from a saved
 HIVE_SKILLS_TARGET=agent-1 HIVE_SKILLS_TARGET_TOKEN_FILE=target-token \
   node scripts/verify-transparency-log.mjs --registry https://skills.example.com \
     --log-key <base64url> --publisher-keys "$PUBLISHER_KEYS" --revocation-keys "$REVOCATION_KEYS" \
-    --known-head 41:<hash> [--page-size 100] --save log.json
+    --known-head 41:<hash> --max-head-age 3600 [--page-size 100] --save log.json
 node scripts/verify-transparency-log.mjs --file log.json --log-key <base64url>
 ```
 
 It checks every link, entry signature and the head signature (with its time and key id), that no
 release was published twice or changed its digest, that deletions name releases that were published,
 that revocation sequences grow, every revocation payload against its logged digest (it fetches them
-and `--save` keeps them), and, given the keys, every publisher signature and revocation list. `--known-head SIZE:HASH` (printed as `knownHead` by the previous run)
+and `--save` keeps them), and, given the keys, every publisher signature and revocation list. `--max-head-age SECONDS` refuses a head signed longer ago than that,
+so a registry cannot keep serving an old head. `--known-head SIZE:HASH` (printed as `knownHead` by the previous run)
 proves the log only grew since. It prints a JSON summary with any warnings (for example a signature
 by a key you did not pass) and exits `1` on any failure. An administrator's Oathweave token can be
 used instead of a target with `HIVE_SKILLS_BEARER_FILE`.

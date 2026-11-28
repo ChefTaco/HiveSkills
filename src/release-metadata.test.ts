@@ -32,6 +32,10 @@ test('the migration release is this package, and its skills schema checksum is u
   assert.equal(release.dataCompatibility.skills, '^1.12.0');
   const { satisfies } = await import('./release/runtime.js');
   assert.equal(satisfies('1.11.1', release.dataCompatibility.skills), false);
+  // A build that records readableBy ^1.12.0 must itself be 1.12.0 or later once released. 1.11.1 is
+  // released already (the release workflow refuses to overwrite its image), so any release of this
+  // code changes the version, and this check, which the release workflow runs, forces it to qualify.
+  assert.ok(pkg.version === '1.11.1' || satisfies(pkg.version, release.dataCompatibility.skills), `release ${pkg.version} would record data it cannot read itself (${release.dataCompatibility.skills})`);
 });
 
 test('migrate keeps a state file written under the legacy 1.2.2 manifest readable', async () => {

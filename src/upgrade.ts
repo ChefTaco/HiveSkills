@@ -67,7 +67,7 @@ export const SKILLS_MIGRATIONS: Release['migrations'] = [
   {
     component: 'skills',
     id: 'managed-format-6',
-    checksum: '0e62f66c9c66c9d840c8c9cbf7c52c2ab4d5f7e979c6e58324da92b21ff4fef1',
+    checksum: '738ba1ad72925af33c02404ff7ccd3a575cfa4b8e7e77fdbf0fed8c87971438b',
     impact: 'fast',
     readableBy: '^1.12.0',
     note: 'Add signed revocation lists and the append-only transparency log in new tables. Older binaries would store releases without logging them, so they refuse this data; roll back by restoring the pre-upgrade backup.',
@@ -138,6 +138,7 @@ export async function skillsMigration(args: readonly string[], automatic = false
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_signatures'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revocation_lists'").get() ||
           !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transparency_log'").get() ||
+          !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_signature_keys'").get() ||
           !columns.has('min_hermes_version') ||
           !columns.has('max_hermes_version') ||
           !db.prepare("SELECT id FROM registry_migrations WHERE id='release-channels'").get(),

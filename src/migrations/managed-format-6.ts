@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 /**
- * Signed revocation lists and the append-only transparency log. Both are new tables: release rows,
+ * Signed revocation lists, the append-only transparency log and the public key that made each stored
+ * release signature (so a revoked key is recognised after it is unpinned). All are new tables: release rows,
  * their positional writes are unaffected. Triggers refuse every UPDATE and DELETE of a stored list or
  * log entry, so history can only grow. Binaries without this format would store releases without
  * logging them, so it is readable only by HiveSkills 1.12.0 and later (SKILLS_DATA_COMPATIBILITY).
@@ -16,6 +17,11 @@ export function initializeRevocationsAndTransparencyLog(db: DatabaseSync): void 
     BEGIN SELECT RAISE(ABORT, 'revocation lists are append-only'); END;
   CREATE TRIGGER IF NOT EXISTS revocation_lists_no_delete BEFORE DELETE ON revocation_lists
     BEGIN SELECT RAISE(ABORT, 'revocation lists are append-only'); END;
+  CREATE TABLE IF NOT EXISTS release_signature_keys (
+    skill_slug TEXT NOT NULL, version TEXT NOT NULL, public_key TEXT NOT NULL,
+    PRIMARY KEY(skill_slug, version),
+    FOREIGN KEY(skill_slug, version) REFERENCES releases(skill_slug, version) ON DELETE CASCADE
+  ) STRICT;
   CREATE TABLE IF NOT EXISTS transparency_log (
     log_index INTEGER PRIMARY KEY CHECK(log_index >= 0),
     entry TEXT NOT NULL, hash TEXT NOT NULL UNIQUE,

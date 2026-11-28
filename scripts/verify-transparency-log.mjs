@@ -5,7 +5,7 @@
 //   HIVE_SKILLS_TARGET=agent-1 HIVE_SKILLS_TARGET_TOKEN_FILE=~/.config/hive-skills/target-token \
 //     node scripts/verify-transparency-log.mjs --registry https://skills.example.com \
 //       --log-key <base64url> [--log-key <older key>] [--publisher-keys JSON] [--revocation-keys JSON] \
-//       [--known-head SIZE:HASH] [--page-size N] [--save log.json]
+//       [--known-head SIZE:HASH] [--max-head-age SECONDS] [--page-size N] [--save log.json]
 //   node scripts/verify-transparency-log.mjs --file log.json --log-key <base64url>
 //
 // Reading the log needs an enrolled target (HIVE_SKILLS_TARGET with HIVE_SKILLS_TARGET_TOKEN or
@@ -70,7 +70,7 @@ const secret = (value, file) => value || (file ? readFileSync(file, 'utf8').trim
 
 export async function main(argv, env = process.env, fetchImpl = fetch) {
   const given = options(argv);
-  const known = new Set(['registry', 'file', 'log-key', 'publisher-keys', 'revocation-keys', 'known-head', 'page-size', 'save']);
+  const known = new Set(['registry', 'file', 'log-key', 'publisher-keys', 'revocation-keys', 'known-head', 'max-head-age', 'page-size', 'save']);
   for (const name of Object.keys(given)) if (!known.has(name)) throw new Error(`Unknown option --${name}`);
   if (!given.registry === !given.file) throw new Error('Pass exactly one of --registry URL or --file FILE');
   const dump = given.file
@@ -90,6 +90,7 @@ export async function main(argv, env = process.env, fetchImpl = fetch) {
     revocationKeys: parsePublisherKeys(given['revocation-keys']),
     revocationPayloads: new Map(Object.entries(dump.revocationPayloads ?? {}).map(([sequence, payload]) => [Number(sequence), payload])),
     knownHead,
+    maxHeadAgeSeconds: given['max-head-age'] === undefined ? undefined : Number(given['max-head-age']),
   });
 }
 

@@ -537,3 +537,54 @@ test('a pinned minimum revocation sequence survives a lost state file', async ()
     await assert.rejects(syncSkills({ ...r.options, revocationKeys: new Map(), minRevocationSequence: 2 }), /needs HIVE_SKILLS_REVOCATION_KEYS/);
   } finally { rmSync(r.f.root, { recursive: true, force: true }); }
 });
+
+// Regression: an installed revoked skill is dealt with whatever the manifest offers for it now.
+test('a key-revoked installed skill is quarantined even when the manifest moves it to a new, unsigned version', async () => {
+  const r = relabelFixture();
+  try {
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    r.signatures['evil@1.0.0'] = r.sign(r.signers.current, 'evil');
+    await syncSkills(r.options);
+    r.state.revocations = r.list(2, { keys: [{ keyId: 'publisher-2026', publicKey: r.publisher.publicKey, reason: 'Synthetic key theft' }] });
+    r.state.manifest = [r.entry('evil', '1.0.1', 'evil-two')];
+    await assert.rejects(syncSkills(r.options), /Quarantined installed skills whose release or signing key is revoked: evil 1\.0\.0 \(signing key publisher-2026 revoked/);
+    assert.equal(existsSync(join(r.options.hermesHome, 'skills/registry/evil')), false);
+    assert.deepEqual(r.state.receipts.at(-1).revocations, [{ slug: 'evil', version: '1.0.0', reason: 'key', keyId: 'publisher-2026', action: 'quarantined' }]);
+    // The new version still needs a valid signature of its own.
+    await assert.rejects(syncSkills(r.options), /evil 1\.0\.1 has no valid signature/);
+    r.signatures['evil@1.0.1'] = r.sign(r.signers.next, 'evil', '1.0.1');
+    await syncSkills(r.options);
+    assert.equal(readFileSync(join(r.options.hermesHome, 'skills/registry/evil/SKILL.md'), 'utf8'), '# evil-two\n');
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+test('in report mode a revoked installed skill does not let a new unsigned version through', async () => {
+  const r = relabelFixture();
+  try {
+    const options = { ...r.options, revokedInstalled: 'report' };
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    r.signatures['evil@1.0.0'] = r.sign(r.signers.current, 'evil');
+    await syncSkills(options);
+    r.state.revocations = r.list(2, { releases: [{ slug: 'evil', version: '1.0.0', sha256: r.shaOf('evil'), reason: 'Synthetic malware' }] });
+    r.state.manifest = [r.entry('evil', '2.0.0', 'unsigned-payload')];
+    const warn = console.warn; console.warn = () => {};
+    try { await assert.rejects(syncSkills(options), /evil 2\.0\.0 has no valid signature/); } finally { console.warn = warn; }
+    assert.equal(readFileSync(join(r.options.hermesHome, 'skills/registry/evil/SKILL.md'), 'utf8'), '# evil\n', 'the unsigned version was not installed');
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});
+
+test('an unusable manifest or unreadable metadata does not keep a revoked installed skill running', async () => {
+  const r = relabelFixture();
+  try {
+    r.state.manifest = [r.entry('evil', '1.0.0')];
+    r.signatures['evil@1.0.0'] = r.sign(r.signers.current, 'evil');
+    await syncSkills(r.options);
+    r.state.revocations = r.list(2, { keys: [{ keyId: 'publisher-2026', publicKey: r.publisher.publicKey, reason: 'Synthetic key theft' }] });
+    // A new version the bridge would refuse as incompatible.
+    r.state.manifest = [{ ...r.entry('evil', '1.0.1', 'evil-two'), compatibility: { minHermesVersion: '9.0.0', maxHermesVersion: null } }];
+    await assert.rejects(syncSkills(r.options), /Quarantined installed skills .*evil 1\.0\.0/);
+    assert.equal(existsSync(join(r.options.hermesHome, 'skills/registry/evil')), false);
+    // The manifest error itself is still reported afterwards.
+    await assert.rejects(syncSkills(r.options), /incompatible/);
+  } finally { rmSync(r.f.root, { recursive: true, force: true }); }
+});

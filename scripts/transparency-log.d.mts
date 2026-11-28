@@ -17,4 +17,6 @@ export function verifyTransparencyLog(options: {
   revocationKeys?: Map<string, import('node:crypto').KeyObject> | undefined;
   revocationPayloads?: Map<number, string> | undefined;
   knownHead?: { size: number; headHash: string } | undefined;
+  maxHeadAgeSeconds?: number | undefined;
+  now?: number;
 }): { size: number; headHash: string; signedAt: string; releases: number; deletedReleases: number; releaseSignatures: number; revocationLists: number; revocationSequence: number; warnings: string[] };

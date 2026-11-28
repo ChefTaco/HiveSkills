@@ -14,7 +14,7 @@ const publisherFile = join(temporary, 'publisher.pem'), secondFile = join(tempor
 const authorityFile = join(temporary, 'authority.pem');
 const publisher = keygen({ out: publisherFile, keyId: 'publisher-2026' });
 const second = keygen({ out: secondFile, keyId: 'publisher-2027' });
-keygen({ out: unpinnedFile, keyId: 'unpinned' });
+const unpinned = keygen({ out: unpinnedFile, keyId: 'unpinned' });
 const authority = keygen({ out: authorityFile, keyId: 'revocations-2026' });
 
 process.env.HIVE_AUTO_MIGRATE = 'true';
@@ -195,6 +195,28 @@ test('a release signed only by a key revoked later shows as revoked_key; a revok
   assert.deepEqual([status('1.0.0'), status('2.0.0')], ['revoked', 'revoked_key']);
 });
 
+test('a revoked key is recognised by its recorded public key after it was unpinned', async () => {
+  // A release signed by a key that was pinned then and is not pinned now: its signer was recorded.
+  release('unpinned-signer', '1.0.0');
+  const digest = sha('unpinned-signer@1.0.0');
+  const { DatabaseSync } = await import('./sqlite.js');
+  const raw = new DatabaseSync(join(temporary, 'registry.sqlite'), { enableForeignKeyConstraints: true });
+  try {
+    raw.prepare('INSERT INTO release_signatures VALUES (?,?,?,?,?)').run('unpinned-signer', '1.0.0', 'unpinned', signRelease({ key: unpinnedFile, keyId: 'unpinned', slug: 'unpinned-signer', version: '1.0.0', sha256: digest }).signature, new Date().toISOString());
+    raw.prepare('INSERT INTO release_signature_keys VALUES (?,?,?)').run('unpinned-signer', '1.0.0', unpinned.publicKey);
+  } finally { raw.close(); }
+  store.promoteRelease('unpinned-signer', '1.0.0', 'stable');
+  const before = await (await app.request(url('/admin/signatures'), { headers: admin })).json() as { releases: Array<{ slug: string; status: string }> };
+  assert.equal(before.releases.find((entry) => entry.slug === 'unpinned-signer')?.status, 'unknown_key');
+  const current = store.storedRevocations()!.sequence;
+  const published = await publish(list(current + 1, { keys: [{ keyId: 'unpinned', publicKey: unpinned.publicKey, reason: 'Synthetic compromise of a retired key' }] }));
+  assert.equal(published.status, 201);
+  assert.deepEqual((await published.json() as { withdrawn: unknown }).withdrawn, [{ slug: 'unpinned-signer', version: '1.0.0', channel: 'stable' }]);
+  assert.equal((await app.request(url('/admin/channels/stable/unpinned-signer'), json('PUT', { version: '1.0.0' }))).status, 409);
+  const after = await (await app.request(url('/admin/signatures'), { headers: admin })).json() as { releases: Array<{ slug: string; status: string }> };
+  assert.equal(after.releases.find((entry) => entry.slug === 'unpinned-signer')?.status, 'revoked_key');
+});
+
 test('receipts may report revoked releases the bridge refused or quarantined', async () => {
   const send = (body: unknown) => app.request(url('/v1/agent/receipts/agent-1'), { method: 'POST', headers: { ...asTarget, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const revocations = [{ slug: 'keyed', version: '1.0.0', reason: 'release', action: 'refused' }, { slug: 'keyed', version: '2.0.0', reason: 'key', keyId: 'publisher-2027', action: 'quarantined' }];
@@ -223,7 +245,7 @@ test('every revocation list and release is in the transparency log, verifiable e
   }
   // The log records each list's digest; the payloads are served by sequence.
   const revocationPayloads = new Map<number, string>();
-  for (const sequence of [1, 2, 3, 4]) revocationPayloads.set(sequence, (await (await app.request(url(`/v1/revocations/${sequence}?target=agent-1`), { headers: asTarget })).json() as { payload: string }).payload);
+  for (const sequence of [1, 2, 3, 4, 5]) revocationPayloads.set(sequence, (await (await app.request(url(`/v1/revocations/${sequence}?target=agent-1`), { headers: asTarget })).json() as { payload: string }).payload);
   assert.equal((await app.request(url('/v1/revocations/9?target=agent-1'), { headers: asTarget })).status, 404);
   assert.equal((await app.request(url('/v1/revocations/01?target=agent-1'), { headers: asTarget })).status, 400);
   assert.equal((await app.request(url('/v1/revocations/1'))).status, 401);
@@ -234,8 +256,8 @@ test('every revocation list and release is in the transparency log, verifiable e
   const summary = verifyTransparencyLog({ entries, head, logKeys: head.logKey.publicKey, revocationKeys, revocationPayloads });
   assert.ok(summary.deletedReleases >= 2);
   assert.ok(entries.every((row) => row.entry.length < 4096), 'no entry embeds a revocation payload');
-  assert.equal(summary.revocationLists, 4);
-  assert.equal(summary.revocationSequence, 4);
+  assert.equal(summary.revocationLists, 5);
+  assert.equal(summary.revocationSequence, 5);
   assert.ok(summary.releases + summary.deletedReleases >= 10);
   // With the publisher keys, the invalid signature this test stored directly (bypassing the upload
   // check) is found; the registry itself never accepts one.

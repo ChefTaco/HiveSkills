@@ -221,3 +221,35 @@ test('the verification CLI pages as asked', async () => {
   assert.equal((await verifyCli(['--registry', 'https://skills.example.com', '--log-key', logPublicKey(), '--page-size', '2'], env, fetchImpl)).size, size);
   for (const bad of ['0', '501', 'x']) await assert.rejects(verifyCli(['--registry', 'https://skills.example.com', '--page-size', bad], env, fetchImpl), /page size/);
 });
+
+test('a head older than allowed is refused', async () => {
+  const { head, entries } = await read();
+  const signedAt = Date.parse(head.signedAt);
+  verifyTransparencyLog({ entries, head, logKeys: logPublicKey(), maxHeadAgeSeconds: 60, now: signedAt + 30_000 });
+  assert.throws(() => verifyTransparencyLog({ entries, head, logKeys: logPublicKey(), maxHeadAgeSeconds: 60, now: signedAt + 61_000 }), /signed 61 seconds ago/);
+  assert.throws(() => verifyTransparencyLog({ entries, head, logKeys: logPublicKey(), maxHeadAgeSeconds: 60, now: signedAt - 600_000 }), /in the future/);
+  const dump = join(temporary, 'aged.json');
+  writeFileSync(dump, JSON.stringify({ head, entries }));
+  await new Promise((done) => setTimeout(done, 1100));
+  const stale = spawnSync(process.execPath, [join(repository, 'scripts/verify-transparency-log.mjs'), '--file', dump, '--log-key', logPublicKey(), '--max-head-age', '1'], { encoding: 'utf8' });
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /longer than the allowed 1/);
+});
+
+test('a registry whose transparency log cannot be reconciled refuses to start', () => {
+  const data = mkdtempSync(join(tmpdir(), 'hive-skills-log-broken-'));
+  try {
+    const script = `
+      const { skillsMigration } = await import(${JSON.stringify(new URL('./upgrade.js', import.meta.url).href)});
+      await skillsMigration([], true);
+      const { DatabaseSync } = await import(${JSON.stringify(new URL('./sqlite.js', import.meta.url).href)});
+      const raw = new DatabaseSync(${JSON.stringify(join(data, 'registry.sqlite'))});
+      raw.prepare("INSERT INTO transparency_log VALUES (0,?,'${'0'.repeat(64)}','k','s')").run(JSON.stringify({ v: 1, index: 0, kind: 'release.signed', subject: { slug: 'broken', version: '1.0.0' } }));
+      raw.close();
+      try { await import(${JSON.stringify(new URL('./app.js', import.meta.url).href)}); console.log('started'); }
+      catch (error) { console.log('refused: ' + error.message); }`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, HIVE_AUTO_MIGRATE: 'true', HIVE_SKILLS_DATA_DIR: data, HIVE_SKILLS_SESSION_SECRET: 'obviously-fake-broken-session-secret-0123456789', HIVE_SKILLS_ADMIN_USERS: 'admin' } });
+    assert.match(result.stdout, /^refused: /m, result.stderr);
+    assert.doesNotMatch(result.stdout, /started/);
+  } finally { rmSync(data, { recursive: true, force: true }); }
+});

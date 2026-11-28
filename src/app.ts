@@ -185,12 +185,11 @@ app.use('*', (c, next) => {
 
 for (const target of config.targets) store.seedTarget(target);
 // On every start, record in the transparency log what was stored without an entry (releases from
-// before the log, or written by a restored or older binary), and withdraw revoked releases again.
-try {
+// before the log, or written by a restored or older binary), and withdraw revoked releases again. A
+// registry that cannot do this does not start: it would serve releases the log does not record.
+{
   const { appended, withdrawn } = store.reconcileTransparencyLog();
   if (appended || withdrawn) console.log(`transparency log: recorded ${appended} backfilled entr${appended === 1 ? 'y' : 'ies'}; withdrew ${withdrawn} revoked release promotion(s)`);
-} catch (error) {
-  console.error('transparency log reconciliation failed', error);
 }
 /** A refusal from the store becomes the HTTP answer it names. */
 const refusal = (error: unknown): never => {
@@ -660,8 +659,8 @@ app.put('/admin/channels/:channel/:slug', requireAuth(true), async (c) => {
   if (store.releaseAdvisory(skill, version)?.level === 'yanked') throw new HTTPException(409, { message: 'A yanked release cannot be promoted' });
   const revocations = store.revocations();
   if (releaseRevocation(revocations, { slug: skill, version, sha256: store.getRelease(skill, version)!.sha256 })) throw new HTTPException(409, { message: 'A revoked release cannot be promoted' });
-  const signedBy = store.releaseSignature(skill, version)?.keyId;
-  if (signedBy && keyRevocation(revocations, config.publisherKeys.get(signedBy))) throw new HTTPException(409, { message: 'A release signed by a revoked publisher key cannot be promoted; sign it with a valid key first' });
+  // By the signer's recorded public key, so also after a revoked key was unpinned.
+  if (keyRevocation(revocations, store.releaseSignerKey(skill, version))) throw new HTTPException(409, { message: 'A release signed by a revoked publisher key cannot be promoted; sign it with a valid key first' });
   store.promoteRelease(skill, version, channel);
   store.audit(c.get('auth').username, 'release.promote', skill, { channel, version });
   return c.json({ ok: true });
@@ -869,9 +868,11 @@ app.get('/v1/transparency/entries', requireTrustReader, (c) => {
 });
 
 /** The signature status of one release against this registry's pinned keys and revocation list. */
-const signatureStatus = (release: { slug: string; version: string; sha256: string; signature: ReleaseSignature | null }, revocations: RevocationList | null) => {
+const signatureStatus = (release: { slug: string; version: string; sha256: string; signature: ReleaseSignature | null; signerPublicKey?: string | undefined }, revocations: RevocationList | null) => {
   if (releaseRevocation(revocations, release)) return 'revoked' as const;
   if (!release.signature) return 'unsigned' as const;
+  // The recorded signer is checked first, so a revoked key still shows after it was unpinned.
+  if (keyRevocation(revocations, release.signerPublicKey)) return 'revoked_key' as const;
   const key = config.publisherKeys.get(release.signature.keyId);
   if (!key) return 'unknown_key' as const;
   if (!verifyReleaseSignature(config.publisherKeys, release, release.signature)) return 'invalid' as const;
