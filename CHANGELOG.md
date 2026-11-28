@@ -4,6 +4,7 @@
 
 ### Changed
 
+- CI fails when a document names a version that is no longer current (`npm run check:doc-versions`, tests in `npm test`): HiveSkills image tags, links into a Hive suite release, and "Hive X.Y.Z pins …" claims, which name no version because the signed suite release manifest is their only source. `CHANGELOG.md` and the retired 1.x launcher's documents (`hive/blob/v1.2.2`) are exempt.
 - `HIVE_SKILLS_MAGNUS_EXECUTOR_JSON` may now set both `oathweave` and `credentialFile`. HiveSkills then prefers the Oathweave service token and falls back to the static credential file, once per request, only when no token can be obtained or Magnus still refuses the token with `401` or `403` (before it admits a job, so nothing is dispatched twice); any other answer or a lost request is never retried. Each fallback logs a warning. Configurations with only one of the two behave as before. This lets a registry move to Oathweave before Magnus accepts its token (Magnus with `HIVESKILLS_SERVICE` links, permission `magnus:hiveskills`, audience `magnus`); see the README's "Approved deployments through Magnus".
 
 ### Deprecated

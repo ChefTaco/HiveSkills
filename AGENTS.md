@@ -48,6 +48,7 @@ npm run build
 npm test              # builds, then node --test over dist/*.test.js and scripts/*.test.mjs
 npm run check:openapi # docs/openapi.json matches the routes
 npm run check:browser # docs/browser-contracts.ts matches src/browser-contracts.ts
+npm run check:doc-versions # documents name only current versions
 npm run scan:secrets
 npm run check:private
 ```

@@ -21,6 +21,7 @@
     "postbuild": "node scripts/build-release-runtime.mjs --copy",
     "scan:secrets": "bash scripts/scan-secrets.sh",
     "check:private": "bash scripts/check-private-data.sh",
+    "check:doc-versions": "node scripts/check-doc-versions.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
     "bootstrap": "npm ci --ignore-scripts && npm --prefix tooling/release ci --ignore-scripts && npm run hooks:install",
     "typecheck": "tsc --noEmit",

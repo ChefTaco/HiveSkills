@@ -30,6 +30,7 @@ jobs:
       - run: npm test
       - run: npm run check:openapi
       - run: npm run check:browser
+      - run: npm run check:doc-versions
       - run: bash scripts/privacy-output.test.sh
       - run: npm run scan:secrets
       - run: npm run check:private
